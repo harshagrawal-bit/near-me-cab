@@ -427,3 +427,4 @@ wallets, loyalty programmes, corporate accounts, multi-city operations.
 - **Rebranding** is `frontend/src/config/brand.js` plus company details in
   Admin → Settings. Grep for a hard-coded "LocalRide" before shipping a rename —
   there should be none outside that file and the seed script.
+# near-me-cab
