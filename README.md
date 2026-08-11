@@ -428,3 +428,4 @@ wallets, loyalty programmes, corporate accounts, multi-city operations.
   Admin → Settings. Grep for a hard-coded "LocalRide" before shipping a rename —
   there should be none outside that file and the seed script.
 # near-me-cab
+# near-me-cab
