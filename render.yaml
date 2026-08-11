@@ -1,0 +1,114 @@
+# Render Blueprint — deploys the API and the web app together.
+#
+# In Render: New → Blueprint → connect this repo. Render reads this file and
+# creates both services. Values marked `sync: false` are NOT stored here and
+# must be typed into the Render dashboard — that is deliberate: secrets do not
+# belong in a git repository.
+#
+# After the first deploy, come back and set:
+#   api      → CORS_ORIGINS  = https://<your-web-service>.onrender.com
+#   web      → VITE_API_BASE_URL = https://<your-api-service>.onrender.com
+# Both need a redeploy afterwards; VITE_* values are baked in at build time.
+
+services:
+  # ---------------------------------------------------------------- API ---
+  - type: web
+    name: nearmecab-api
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    # Singapore is Render's closest region to India (~60-80ms).
+    region: singapore
+    plan: starter # `free` sleeps after 15 min → ~50s cold start.
+    healthCheckPath: /api/health
+    envVars:
+      - key: ENV
+        value: production
+      - key: DEBUG
+        value: "false"
+
+      # Generated once by Render and kept. Rotating it signs everyone out.
+      - key: JWT_SECRET
+        generateValue: true
+
+      # Atlas connection string, including the database user's password.
+      - key: MONGODB_URI
+        sync: false
+      - key: MONGODB_DB_NAME
+        value: nearmecab
+
+      # Cross-site cookie: the web app is on a different hostname to the API,
+      # so SameSite=Lax would silently drop the refresh cookie on every load.
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: COOKIE_SAMESITE
+        value: none
+
+      # Exact origin of the web service. No wildcards — allow_credentials is
+      # on, and a wildcard origin with credentials is both invalid and unsafe.
+      - key: CORS_ORIGINS
+        sync: false
+
+      - key: RATE_LIMIT_ENABLED
+        value: "true"
+      - key: AUTH_RATE_LIMIT
+        value: "10"
+      - key: REFRESH_RATE_LIMIT
+        value: "120"
+
+      # The first admin account. Change the password after signing in once.
+      - key: SEED_ADMIN_EMAIL
+        sync: false
+      - key: SEED_ADMIN_PASSWORD
+        sync: false
+
+      # External services. Blank is fine — each feature stays switched off
+      # until its key is present, rather than half-working.
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_MAPS_API_KEY
+        sync: false
+      - key: RAZORPAY_KEY_ID
+        sync: false
+      - key: RAZORPAY_KEY_SECRET
+        sync: false
+      - key: RAZORPAY_WEBHOOK_SECRET
+        sync: false
+
+  # ------------------------------------------------------------ Web app ---
+  - type: web
+    name: nearmecab-web
+    runtime: static
+    rootDir: ./frontend
+    buildCommand: npm ci && npm run build
+    staticPublishPath: ./dist
+    # Static sites are free on Render and never sleep.
+    routes:
+      # Single-page app: every unmatched path must serve index.html, or a
+      # refresh on /admin/bookings returns 404 instead of the app.
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    headers:
+      - path: /*
+        name: X-Frame-Options
+        value: DENY
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
+      - path: /assets/*
+        name: Cache-Control
+        value: public, max-age=31536000, immutable
+    envVars:
+      - key: VITE_API_BASE_URL
+        sync: false
+      - key: VITE_BRAND_NAME
+        value: NearMe Cab
+      - key: VITE_BRAND_TAGLINE
+        value: A cab, near you.
+      - key: VITE_BRAND_SUPPORT_PHONE
+        sync: false
+      - key: VITE_BRAND_SUPPORT_EMAIL
+        sync: false
+      - key: VITE_GOOGLE_CLIENT_ID
+        sync: false

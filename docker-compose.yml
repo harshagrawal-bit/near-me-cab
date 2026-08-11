@@ -1,0 +1,55 @@
+# Local development stack: MongoDB + API + frontend.
+#
+#   docker compose up --build
+#   docker compose exec api python -m scripts.seed --reset
+#
+# Secrets come from backend/.env (git-ignored). Copy backend/.env.example first.
+
+services:
+  mongo:
+    image: mongo:8
+    restart: unless-stopped
+    ports:
+      - '27017:27017'
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ['CMD', 'mongosh', '--quiet', '--eval', "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    environment:
+      # Override the host-oriented value from .env with the compose service name.
+      MONGODB_URI: mongodb://mongo:27017
+    ports:
+      - '8000:8000'
+    depends_on:
+      mongo:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD-SHELL', 'python -c "import urllib.request;urllib.request.urlopen(\"http://localhost:8000/api/health\")"']
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  web:
+    build:
+      context: ./frontend
+      args:
+        # Baked into the bundle at build time — public values only.
+        VITE_API_BASE_URL: ''
+    restart: unless-stopped
+    ports:
+      - '5173:80'
+    depends_on:
+      - api
+
+volumes:
+  mongo_data:

@@ -1,0 +1,104 @@
+"""Admin settings and support schemas."""
+
+from __future__ import annotations
+
+from pydantic import EmailStr, Field
+
+from app.schemas.common import ApiModel, Phone
+
+
+class CompanySettings(ApiModel):
+    legal_name: str = Field(default="LocalRide Travels", max_length=120)
+    support_email: str = Field(default="support@localride.in", max_length=120)
+    support_phone: str = Field(default="9000000000", max_length=20)
+    whatsapp_number: str = Field(default="9000000000", max_length=20)
+    address: str = Field(default="Pune, Maharashtra", max_length=250)
+    gst_number: str | None = Field(default=None, max_length=20)
+    working_hours: str = Field(default="24x7", max_length=60)
+
+
+class PricingSettings(ApiModel):
+    """Knobs the fare engine reads. Editable by admin, never by the client."""
+
+    currency: str = Field(default="INR", max_length=3)
+    #: Night-window hours below are wall-clock hours in this zone, not UTC.
+    timezone: str = Field(default="Asia/Kolkata", max_length=64)
+    round_trip_multiplier: float = Field(default=1.85, ge=1, le=5)
+    local_multiplier: float = Field(default=1.0, ge=0.1, le=5)
+    airport_multiplier: float = Field(default=1.0, ge=0.1, le=5)
+    one_way_multiplier: float = Field(default=1.0, ge=0.1, le=5)
+    night_start_hour: int = Field(default=22, ge=0, le=23)
+    night_end_hour: int = Field(default=5, ge=0, le=23)
+    tax_percent: float = Field(default=0, ge=0, le=50)
+    free_cancellation_hours: int = Field(default=2, ge=0, le=168)
+    cancellation_fee_percent: float = Field(default=0, ge=0, le=100)
+
+
+class BookingSettings(ApiModel):
+    min_advance_minutes: int = Field(default=30, ge=0, le=10_080)
+    max_advance_days: int = Field(default=90, ge=1, le=365)
+    auto_confirm: bool = False
+
+
+class AdvanceSettings(ApiModel):
+    """The deposit a customer pays to turn a confirmed quote into a booking.
+
+    The percentage lives here rather than in the frontend so it can be changed
+    without a release, and so the server remains the only thing that decides
+    what a customer owes.
+    """
+
+    enabled: bool = True
+    percent: float = Field(default=15, ge=0, le=100)
+    #: Never ask for less than this, so tiny trips still carry a real commitment.
+    min_amount: float = Field(default=0, ge=0)
+    #: 0 disables the ceiling. Stops a long outstation trip demanding a fortune up front.
+    max_amount: float = Field(default=0, ge=0)
+
+
+class WalletSettings(ApiModel):
+    """Security deposit rules for fleet owners.
+
+    `min_balance` is the floor an owner must keep to stay eligible for work at
+    all. `per_ride_*` describe the additional amount a specific ride ties up
+    while it is live — the real formula is pending, so this is deliberately a
+    simple, documented placeholder that `wallet_service.required_for_booking`
+    reads. Changing the rule should mean changing that one function.
+    """
+
+    min_balance: float = Field(default=800, ge=0)
+    #: Share of the trip fare that must be available to accept it.
+    per_ride_percent: float = Field(default=10, ge=0, le=100)
+    #: Floor for the per-ride requirement.
+    per_ride_min: float = Field(default=200, ge=0)
+    #: 0 disables the ceiling.
+    per_ride_max: float = Field(default=0, ge=0)
+
+
+class SettingsPayload(ApiModel):
+    company: CompanySettings = Field(default_factory=CompanySettings)
+    pricing: PricingSettings = Field(default_factory=PricingSettings)
+    booking: BookingSettings = Field(default_factory=BookingSettings)
+    advance: AdvanceSettings = Field(default_factory=AdvanceSettings)
+    wallet: WalletSettings = Field(default_factory=WalletSettings)
+
+
+class SettingsUpdate(ApiModel):
+    company: CompanySettings | None = None
+    pricing: PricingSettings | None = None
+    booking: BookingSettings | None = None
+    advance: AdvanceSettings | None = None
+    wallet: WalletSettings | None = None
+
+
+class SupportRequest(ApiModel):
+    subject: str = Field(min_length=3, max_length=120)
+    message: str = Field(min_length=10, max_length=2000)
+    booking_id: str | None = Field(default=None, max_length=40)
+    contact_phone: Phone | None = None
+    contact_email: EmailStr | None = None
+
+
+class SuspendRequest(ApiModel):
+    suspended: bool
+    reason: str | None = Field(default=None, max_length=300)
