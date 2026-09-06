@@ -19,7 +19,7 @@ services:
     dockerContext: ./backend
     # Singapore is Render's closest region to India (~60-80ms).
     region: singapore
-    plan: starter # `free` sleeps after 15 min → ~50s cold start.
+    plan: free # `free` sleeps after 15 min → ~50s cold start.
     healthCheckPath: /api/health
     envVars:
       - key: ENV
