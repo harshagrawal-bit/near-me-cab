@@ -70,6 +70,23 @@ INDEXES: dict[str, list[dict]] = {
     Collections.PAYMENTS: [
         {"keys": [("booking_id", ASCENDING)], "name": "booking"},
         {"keys": [("status", ASCENDING), ("created_at", DESCENDING)], "name": "status_recent"},
+        # Defence in depth behind the intent compare-and-set: even if two
+        # callers somehow both applied a gateway payment, the ledger physically
+        # cannot hold the same provider reference twice. Partial, because
+        # manually recorded payments legitimately have no reference.
+        {
+            "keys": [("provider", ASCENDING), ("provider_reference", ASCENDING)],
+            "unique": True,
+            "name": "uniq_provider_reference",
+            "partialFilterExpression": {"provider_reference": {"$type": "string"}},
+        },
+    ],
+    Collections.PAYMENT_INTENTS: [
+        # The idempotency key. One order, one intent, enforced by the database
+        # rather than by whichever request happens to arrive first.
+        {"keys": [("order_id", ASCENDING)], "unique": True, "name": "uniq_order"},
+        {"keys": [("user_id", ASCENDING), ("created_at", DESCENDING)], "name": "user_recent"},
+        {"keys": [("status", ASCENDING)], "name": "status"},
     ],
     Collections.COUPONS: [
         {"keys": [("code", ASCENDING)], "unique": True, "name": "uniq_code"},

@@ -146,6 +146,13 @@ export const paymentService = {
   list: (params) => api.get('/api/payments', { params }),
   methods: () => api.get('/api/payments/methods'),
   forBooking: (bookingId) => api.get(`/api/payments/booking/${bookingId}`),
+
+  /** Open a Razorpay order. The server decides the amount for a fare; only a
+   *  wallet top-up passes one, and it is range-checked server-side. */
+  createOrder: (payload) => api.post('/api/payments/razorpay/order', payload),
+  /** Confirm a checkout that just succeeded in the browser. The webhook is
+   *  authoritative, so this is only the fast path for immediate feedback. */
+  verifyCheckout: (payload) => api.post('/api/payments/razorpay/verify', payload),
 }
 
 /* ------------------------------------------------------------- coupons --- */

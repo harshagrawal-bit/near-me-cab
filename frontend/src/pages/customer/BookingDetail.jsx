@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { useApi } from '@/hooks/useApi'
-import { bookingService, reviewService } from '@/services'
+import { bookingService, paymentService, reviewService } from '@/services'
 import { CUSTOMER_CANCELLABLE, TRIP_TYPES } from '@/lib/constants'
 import { brand } from '@/config/brand'
 import { formatCurrency, formatDateTime, formatPhone, initials } from '@/lib/format'
@@ -22,6 +22,7 @@ import {
 import StatusTimeline from '@/components/booking/StatusTimeline'
 import FareSummary from '@/components/booking/FareSummary'
 import { useToast } from '@/components/ui/Toast'
+import { startPayment } from '@/lib/razorpay'
 import { cn } from '@/lib/cn'
 
 export default function BookingDetail() {
@@ -38,6 +39,45 @@ export default function BookingDetail() {
   const [cancelOpen, setCancelOpen] = useState(false)
   const [cancelReason, setCancelReason] = useState('')
   const [cancelling, setCancelling] = useState(false)
+
+  const { data: payMethods } = useApi(() => paymentService.methods(), [])
+  const onlineEnabled = Boolean(payMethods?.online_enabled)
+  const [paying, setPaying] = useState(false)
+
+  // Server-side is the authority on what is owed; this is display only, and
+  // the payment endpoint recomputes it regardless of what is rendered here.
+  const outstanding = Math.max(
+    0,
+    Number(booking?.total_fare || 0) - Number(booking?.amount_paid || 0),
+  )
+
+  /** Advance or balance — the server decides which amount either one means. */
+  async function pay(purpose) {
+    setPaying(true)
+    try {
+      await startPayment({
+        purpose,
+        bookingId,
+        description:
+          purpose === 'advance'
+            ? `Advance for ${booking?.booking_id || 'your trip'}`
+            : `Balance for ${booking?.booking_id || 'your trip'}`,
+      })
+      toast.success('Payment received. Your booking is confirmed.')
+      refetch()
+    } catch (err) {
+      // A closed sheet is a decision, not a fault, so it passes silently.
+      if (err?.cancelled) return
+      if (err?.pending) {
+        toast.info('Payment received. We are confirming it — this page will update shortly.')
+        refetch()
+        return
+      }
+      toast.error(err?.message || 'The payment did not go through.')
+    } finally {
+      setPaying(false)
+    }
+  }
   const [reviewOpen, setReviewOpen] = useState(false)
 
   if (loading) return <SkeletonCard lines={10} />
@@ -101,13 +141,24 @@ export default function BookingDetail() {
             the booking. The remaining {formatCurrency(booking.balance_due)} is due at the
             end of the trip.
           </p>
-          <p className="mt-2 text-sm">
-            Online payment is not available yet — call{' '}
-            <a href={`tel:${brand.supportPhone}`} className="font-medium underline">
-              {formatPhone(brand.supportPhone)}
-            </a>{' '}
-            and our team will take the advance and confirm your booking.
-          </p>
+          {onlineEnabled ? (
+            <div className="mt-3 flex flex-wrap items-center gap-3">
+              <Button variant="brand" loading={paying} onClick={() => pay('advance')}>
+                Pay {formatCurrency(booking.advance_amount)} now
+              </Button>
+              <span className="text-sm text-ink-600">
+                Card, UPI, netbanking or wallet
+              </span>
+            </div>
+          ) : (
+            <p className="mt-2 text-sm">
+              Online payment is not available yet — call{' '}
+              <a href={`tel:${brand.supportPhone}`} className="font-medium underline">
+                {formatPhone(brand.supportPhone)}
+              </a>{' '}
+              and our team will take the advance and confirm your booking.
+            </p>
+          )}
         </Alert>
       )}
 
@@ -254,6 +305,31 @@ export default function BookingDetail() {
                 <span className="text-sm text-ink-500">Payment</span>
                 <StatusBadge kind="payment" status={booking.payment_status} />
               </div>
+
+              {/* Settling the rest online. Offered once the trip is under way —
+                  before that the advance is the only thing owed, and asking for
+                  the balance early invites refunds when a trip is cancelled. */}
+              {onlineEnabled &&
+                outstanding > 0 &&
+                ['picked_up', 'trip_started', 'completed'].includes(booking.status) && (
+                  <div className="mt-4 border-t border-ink-100 pt-3">
+                    <div className="flex items-baseline justify-between">
+                      <span className="text-sm text-ink-500">Outstanding</span>
+                      <span className="font-semibold">{formatCurrency(outstanding)}</span>
+                    </div>
+                    <Button
+                      variant="brand"
+                      className="mt-3 w-full"
+                      loading={paying}
+                      onClick={() => pay('balance')}
+                    >
+                      Pay {formatCurrency(outstanding)} now
+                    </Button>
+                    <p className="mt-2 text-center text-xs text-ink-500">
+                      Or pay the driver in cash.
+                    </p>
+                  </div>
+                )}
               {booking.fare_overridden && (
                 <Alert tone="info" className="mt-3">
                   Fare adjusted by our team.

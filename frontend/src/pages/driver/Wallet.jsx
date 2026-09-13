@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useApi } from '@/hooks/useApi'
-import { fleetService } from '@/services'
+import { fleetService, paymentService } from '@/services'
 import { formatCurrency, formatShortDateTime, titleCase } from '@/lib/format'
 import { Card, CardBody, CardHeader, StatCard } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
@@ -8,6 +8,13 @@ import Pagination from '@/components/ui/Pagination'
 import { Alert, EmptyState, ErrorState, PageHeader } from '@/components/ui/States'
 import { SkeletonStats, SkeletonList } from '@/components/ui/Loaders'
 import { IconWallet } from '@/components/ui/Icons'
+import Button from '@/components/ui/Button'
+import { Field, Input } from '@/components/ui/Field'
+import { useToast } from '@/components/ui/Toast'
+import { startPayment } from '@/lib/razorpay'
+
+/** Amounts a driver most often adds, so the common case is one tap. */
+const QUICK_AMOUNTS = [500, 1000, 2000, 5000]
 
 /** How each ledger entry should read to a driver. */
 const TXN_META = {
@@ -26,6 +33,40 @@ export default function DriverWallet() {
     () => fleetService.transactions({ page, page_size: 20 }),
     [page],
   )
+  const { data: payMethods } = useApi(() => paymentService.methods(), [])
+  const onlineEnabled = Boolean(payMethods?.online_enabled)
+  const toast = useToast()
+  const [amount, setAmount] = useState('')
+  const [paying, setPaying] = useState(false)
+
+  async function topUp(value) {
+    const rupees = Number(value)
+    if (!rupees || rupees <= 0) {
+      toast.error('Enter an amount to add.')
+      return
+    }
+    setPaying(true)
+    try {
+      await startPayment({
+        purpose: 'wallet_topup',
+        amount: rupees,
+        description: 'Security deposit top-up',
+      })
+      toast.success('Deposit added to your wallet.')
+      setAmount('')
+      refetch()
+    } catch (err) {
+      if (err?.cancelled) return
+      if (err?.pending) {
+        toast.info('Payment received. Your balance will update shortly.')
+        refetch()
+        return
+      }
+      toast.error(err?.message || 'The payment did not go through.')
+    } finally {
+      setPaying(false)
+    }
+  }
 
   if (loading) return <SkeletonStats count={3} />
   if (error) return <ErrorState title="Could not load your wallet" error={error} onRetry={refetch} />
@@ -71,16 +112,61 @@ export default function DriverWallet() {
       <Card>
         <CardHeader
           title="Adding money"
-          description="Deposits are recorded by the operations team."
+          description={
+            onlineEnabled
+              ? 'Pay by card, UPI, netbanking or wallet. Credited the moment it clears.'
+              : 'Deposits are recorded by the operations team.'
+          }
         />
         <CardBody>
-          {/* Honest about how this actually works today rather than showing a
-              "Add money" button that cannot take a payment. */}
-          <p className="text-sm text-ink-600">
-            Online top-up is not available yet. Transfer the amount to the office and the
-            operations team will add it to your wallet, where it will appear in the
-            statement below.
-          </p>
+          {onlineEnabled ? (
+            <>
+              {shortfall > 0 && (
+                <Alert tone="warning" className="mb-4">
+                  You are {formatCurrency(shortfall)} below the minimum balance. Add at
+                  least that much to start accepting trips again.
+                </Alert>
+              )}
+              <div className="flex flex-wrap gap-2">
+                {QUICK_AMOUNTS.map((value) => (
+                  <Button
+                    key={value}
+                    variant="secondary"
+                    disabled={paying}
+                    onClick={() => topUp(value)}
+                  >
+                    {formatCurrency(value)}
+                  </Button>
+                ))}
+              </div>
+              <div className="mt-4 flex items-end gap-3">
+                <Field label="Other amount" className="flex-1">
+                  <Input
+                    type="number"
+                    inputMode="numeric"
+                    min="100"
+                    placeholder="2500"
+                    value={amount}
+                    onChange={(event) => setAmount(event.target.value)}
+                  />
+                </Field>
+                <Button
+                  variant="brand"
+                  loading={paying}
+                  disabled={!amount}
+                  onClick={() => topUp(amount)}
+                >
+                  Add money
+                </Button>
+              </div>
+            </>
+          ) : (
+            <p className="text-sm text-ink-600">
+              Online top-up is not available yet. Transfer the amount to the office and the
+              operations team will add it to your wallet, where it will appear in the
+              statement below.
+            </p>
+          )}
         </CardBody>
       </Card>
 

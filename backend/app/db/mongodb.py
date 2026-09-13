@@ -60,6 +60,7 @@ class Collections:
     ADMIN_SETTINGS = "admin_settings"
     COUNTERS = "counters"
     WALLET_TRANSACTIONS = "wallet_transactions"
+    PAYMENT_INTENTS = "payment_intents"
 
 
 def collection(name: str) -> AsyncIOMotorCollection:
@@ -121,3 +122,7 @@ def counters() -> AsyncIOMotorCollection:
 
 def wallet_transactions() -> AsyncIOMotorCollection:
     return collection(Collections.WALLET_TRANSACTIONS)
+
+
+def payment_intents() -> AsyncIOMotorCollection:
+    return collection(Collections.PAYMENT_INTENTS)
