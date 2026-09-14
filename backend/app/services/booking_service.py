@@ -48,6 +48,7 @@ from app.services import (
     coupon_service,
     driver_service,
     notification_service,
+    payment_service,
     pricing_service,
     route_service,
     settings_service,
@@ -551,6 +552,39 @@ async def assign_driver(
         body=f"Pickup at {booking['pickup']['address']}.",
         booking_id=booking_oid,
         data={"booking_id": booking["booking_id"]},
+        channels=notification_service.URGENT_CHANNELS,
+    )
+
+    # The message the customer is actually waiting for. Carries the driver's
+    # name and number, because "a driver has been assigned" without them just
+    # generates a call to the office.
+    driver_user = await mongodb.users().find_one(
+        {"_id": driver["user_id"]}, {"name": 1, "phone": 1}
+    )
+    driver_name = (driver_user or {}).get("name") or "Your driver"
+    driver_phone = (driver_user or {}).get("phone")
+    vehicle_note = ""
+    if booking.get("vehicle_id"):
+        vehicle = await mongodb.vehicles().find_one(
+            {"_id": booking["vehicle_id"]}, {"registration_number": 1, "model": 1}
+        )
+        if vehicle:
+            vehicle_note = " · " + " ".join(
+                part for part in (vehicle.get("model"), vehicle.get("registration_number")) if part
+            )
+    await notification_service.notify(
+        user_id=booking["customer_id"],
+        notification_type=NotificationType.DRIVER_ASSIGNED,
+        title=f"Driver assigned · {booking['booking_id']}",
+        body=(
+            f"{driver_name}"
+            + (f" ({driver_phone})" if driver_phone else "")
+            + vehicle_note
+            + f" will pick you up at {booking['pickup']['address']}."
+        ),
+        booking_id=booking_oid,
+        data={"booking_id": booking["booking_id"], "driver_phone": driver_phone},
+        channels=notification_service.URGENT_CHANNELS,
     )
     if is_reassignment:
         old_driver = await driver_service.get_driver(previous_driver)
@@ -628,6 +662,42 @@ async def cancel_booking(
             "cancellation_fee": fee,
         },
     )
+    # Give the advance back before anything else that can fail. Deliberately
+    # non-fatal: a cancellation the customer asked for must complete even if
+    # the gateway is unreachable, so a failed refund is queued for operations
+    # rather than leaving the trip live.
+    refund = await payment_service.refund_booking_advance(
+        booking, fee=fee, reason=reason
+    )
+    if refund.get("refunded"):
+        await _record_history(
+            booking_oid,
+            BookingStatus.CANCELLED.value,
+            BookingStatus.CANCELLED.value,
+            actor_id=actor_id,
+            actor_role=actor_role,
+            note=f"Advance of ₹{refund['amount']:,.0f} refunded.",
+        )
+        await notification_service.notify(
+            user_id=booking["customer_id"],
+            notification_type=NotificationType.BOOKING_CANCELLED,
+            title=f"Refund on the way · {booking['booking_id']}",
+            body=(
+                f"₹{refund['amount']:,.0f} is being returned to the account you "
+                "paid from. Banks usually take 5-7 working days."
+            ),
+            booking_id=booking_oid,
+        )
+    elif refund.get("pending"):
+        await _record_history(
+            booking_oid,
+            BookingStatus.CANCELLED.value,
+            BookingStatus.CANCELLED.value,
+            actor_id=actor_id,
+            actor_role=actor_role,
+            note="Refund queued — needs to be sent by operations.",
+        )
+
     if booking.get("coupon_code"):
         await coupon_service.release(booking["coupon_code"])
     if booking.get("driver_id"):

@@ -100,6 +100,35 @@ async def create_order(
     return response.json()
 
 
+async def create_refund(
+    *, payment_id: str, amount_rupees: float, notes: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    """Refund a captured payment, in full or in part.
+
+    Razorpay is itself idempotent per refund request only if given a key, so
+    callers must not retry blindly — the ledger row written alongside is what
+    stops a second refund, not this function.
+    """
+    if not is_configured():
+        raise ValidationError("Online payments are not configured on this server.")
+    amount = to_paise(amount_rupees)
+    if amount <= 0:
+        raise ValidationError("Refund amount must be greater than zero.")
+
+    async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as client:
+        response = await client.post(
+            f"{API_BASE}/payments/{payment_id}/refund",
+            json={"amount": amount, "notes": notes or {}, "speed": "normal"},
+            auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET),
+        )
+    if response.status_code >= 400:
+        logger.error(
+            "Razorpay refund failed for %s (%s)", payment_id, response.status_code
+        )
+        raise ValidationError("The refund could not be processed. Please try again.")
+    return response.json()
+
+
 async def fetch_payment(payment_id: str) -> dict[str, Any] | None:
     """Read a payment back from Razorpay.
 

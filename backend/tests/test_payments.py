@@ -287,3 +287,136 @@ async def test_advance_cannot_be_paid_twice(seeded):
     # The booking has left AWAITING_PAYMENT, so the second order cannot apply.
     with pytest.raises(ConflictError):
         await payment_service.apply_payment(order_id=second, payment_id="pay_a2", source="webhook")
+
+
+# ---------------------------------------------------------------------------
+# Refunds
+# ---------------------------------------------------------------------------
+
+
+async def _cancellable_booking(customer, *, advance_paid=450.0, provider="razorpay"):
+    booking_oid = ObjectId()
+    await mongodb.bookings().insert_one(
+        {
+            "_id": booking_oid,
+            "booking_id": f"LR-REF-{str(booking_oid)[-4:]}",
+            "customer_id": customer["_id"],
+            "status": BookingStatus.CONFIRMED.value,
+            "vehicle_type": "sedan",
+            "total_fare": 3000.0,
+            "amount_paid": advance_paid,
+            "advance_amount": advance_paid,
+            "advance_status": AdvanceStatus.PAID.value,
+            "created_at": utcnow(),
+            "updated_at": utcnow(),
+        }
+    )
+    await mongodb.payments().insert_one(
+        {
+            "booking_id": booking_oid,
+            "customer_id": customer["_id"],
+            "amount": advance_paid,
+            "kind": "advance",
+            "status": "paid",
+            "provider": provider,
+            "provider_reference": f"pay_ref_{ObjectId()}" if provider == "razorpay" else None,
+            "created_at": utcnow(),
+            "updated_at": utcnow(),
+        }
+    )
+    return await mongodb.bookings().find_one({"_id": booking_oid})
+
+
+async def test_refund_returns_the_advance_less_the_fee(seeded, monkeypatch):
+    """A cancellation fee comes out of the refund, not on top of it."""
+    sent = {}
+
+    async def fake_refund(*, payment_id, amount_rupees, notes=None):
+        sent.update(payment_id=payment_id, amount=amount_rupees)
+        return {"id": "rfnd_test_1"}
+
+    monkeypatch.setattr(razorpay_service, "create_refund", fake_refund)
+    booking = await _cancellable_booking(seeded["customer"], advance_paid=450.0)
+
+    result = await payment_service.refund_booking_advance(booking, fee=100.0, reason="changed plans")
+
+    assert result["refunded"] is True
+    assert sent["amount"] == 350.0
+    updated = await mongodb.bookings().find_one({"_id": booking["_id"]})
+    assert updated["advance_status"] == AdvanceStatus.REFUNDED.value
+
+
+async def test_refund_is_written_as_a_negative_ledger_row(seeded, monkeypatch):
+    """The original payment stays; the refund is its own row."""
+
+    async def fake_refund(**_):
+        return {"id": "rfnd_test_2"}
+
+    monkeypatch.setattr(razorpay_service, "create_refund", fake_refund)
+    booking = await _cancellable_booking(seeded["customer"], advance_paid=600.0)
+
+    await payment_service.refund_booking_advance(booking, fee=0.0, reason="cancelled")
+
+    rows = [doc async for doc in mongodb.payments().find({"booking_id": booking["_id"]})]
+    kinds = {row["kind"]: row["amount"] for row in rows}
+    assert kinds["advance"] == 600.0
+    assert kinds["refund"] == -600.0
+
+
+async def test_a_gateway_failure_queues_the_refund_instead_of_losing_it(seeded, monkeypatch):
+    """Razorpay being down must never strand a cancellation."""
+
+    async def boom(**_):
+        raise RuntimeError("gateway unavailable")
+
+    monkeypatch.setattr(razorpay_service, "create_refund", boom)
+    booking = await _cancellable_booking(seeded["customer"], advance_paid=500.0)
+
+    result = await payment_service.refund_booking_advance(booking, fee=0.0, reason="cancelled")
+
+    assert result["refunded"] is False
+    assert result["pending"] is True
+    pending = await payment_service.pending_refunds()
+    assert any(row["booking_id"] == str(booking["_id"]) for row in pending)
+
+
+async def test_an_offline_advance_is_flagged_for_manual_return(seeded):
+    """Cash in, cash out — but somebody has to be told."""
+    booking = await _cancellable_booking(seeded["customer"], advance_paid=400.0, provider="manual")
+
+    result = await payment_service.refund_booking_advance(booking, fee=0.0, reason="cancelled")
+
+    assert result["refunded"] is False
+    assert result["pending"] is True
+
+
+async def test_a_fee_larger_than_the_advance_refunds_nothing(seeded):
+    """Never refund a negative amount, and never charge extra either."""
+    booking = await _cancellable_booking(seeded["customer"], advance_paid=200.0)
+
+    result = await payment_service.refund_booking_advance(booking, fee=500.0, reason="late cancel")
+
+    assert result["refunded"] is False
+    updated = await mongodb.bookings().find_one({"_id": booking["_id"]})
+    assert updated["refund_amount"] == 0.0
+
+
+async def test_an_unpaid_booking_is_not_refunded(seeded):
+    booking_oid = ObjectId()
+    await mongodb.bookings().insert_one(
+        {
+            "_id": booking_oid,
+            "booking_id": "LR-REF-NONE",
+            "customer_id": seeded["customer"]["_id"],
+            "status": BookingStatus.REQUESTED.value,
+            "vehicle_type": "sedan",
+            "total_fare": 1000.0,
+            "amount_paid": 0.0,
+            "advance_status": AdvanceStatus.PENDING.value,
+            "created_at": utcnow(),
+            "updated_at": utcnow(),
+        }
+    )
+    booking = await mongodb.bookings().find_one({"_id": booking_oid})
+    result = await payment_service.refund_booking_advance(booking, fee=0.0, reason="cancelled")
+    assert result["refunded"] is False

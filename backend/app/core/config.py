@@ -77,6 +77,30 @@ class Settings(BaseSettings):
     #: Verifies that a webhook really came from Razorpay. Server-side only.
     RAZORPAY_WEBHOOK_SECRET: str = ""
 
+    # ---- Messaging ----
+    #: Numbers are stored as 10 digits; providers want E.164. Prefixed with
+    #: this unless the stored number already carries a country code.
+    DEFAULT_COUNTRY_CODE: str = "+91"
+
+    #: WhatsApp Cloud API (Meta). The phone number id is NOT the phone number —
+    #: it is the id Meta assigns it in the WhatsApp Manager.
+    WHATSAPP_PHONE_NUMBER_ID: str = ""
+    WHATSAPP_ACCESS_TOKEN: str = ""
+    #: WhatsApp only allows free-form text inside a 24-hour window after the
+    #: customer last wrote to you. A booking update is almost always outside
+    #: it, so proactive messages must use a pre-approved template. Leave this
+    #: blank and the adapter sends plain text, which will be rejected outside
+    #: that window — set it to your approved template name in production.
+    WHATSAPP_TEMPLATE_NAME: str = ""
+    WHATSAPP_TEMPLATE_LANG: str = "en"
+
+    #: SMS via Twilio. In India, sending SMS also requires DLT registration of
+    #: the sender id and templates with your operator — a Twilio account alone
+    #: is not enough to deliver to Indian numbers.
+    TWILIO_ACCOUNT_SID: str = ""
+    TWILIO_AUTH_TOKEN: str = ""
+    TWILIO_FROM_NUMBER: str = ""
+
     @property
     def cors_origins(self) -> List[str]:
         return [origin.strip() for origin in self.CORS_ORIGINS.split(",") if origin.strip()]

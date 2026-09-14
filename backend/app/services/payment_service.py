@@ -288,3 +288,126 @@ async def mark_failed(*, order_id: str, reason: str | None = None) -> None:
 async def intent_for_order(order_id: str) -> dict[str, Any] | None:
     doc = await mongodb.payment_intents().find_one({"order_id": order_id})
     return serialize(doc) if doc else None
+
+
+# ---------------------------------------------------------------------------
+# Refunds
+# ---------------------------------------------------------------------------
+
+
+async def refund_booking_advance(
+    booking: dict[str, Any], *, fee: float = 0.0, reason: str = ""
+) -> dict[str, Any]:
+    """Return a paid advance when a booking is cancelled, less any fee.
+
+    Deliberately never raises into the cancellation that calls it. A booking
+    the customer asked to cancel must end up cancelled whether or not Razorpay
+    is reachable this second; a refund we could not send becomes a `pending`
+    row for operations to retry, not a failed cancellation and a confused
+    customer who still has a live trip.
+
+    Returns a short summary of what happened, for the audit trail.
+    """
+    booking_oid = booking["_id"]
+
+    if booking.get("advance_status") != AdvanceStatus.PAID.value:
+        return {"refunded": False, "reason": "no advance was paid"}
+
+    # The advance ledger row tells us how it was paid. A cash or manually
+    # recorded advance has no gateway payment to reverse.
+    payment = await mongodb.payments().find_one(
+        {"booking_id": booking_oid, "kind": "advance", "status": PaymentStatus.PAID.value}
+    )
+    if not payment:
+        return {"refunded": False, "reason": "no advance payment on record"}
+
+    paid = float(payment.get("amount") or 0)
+    refundable = round(max(paid - float(fee or 0), 0), 2)
+    if refundable <= 0:
+        await mongodb.bookings().update_one(
+            {"_id": booking_oid},
+            {"$set": {"advance_status": AdvanceStatus.REFUNDED.value, "refund_amount": 0.0}},
+        )
+        return {"refunded": False, "reason": "cancellation fee absorbed the advance"}
+
+    if payment.get("provider") != "razorpay" or not payment.get("provider_reference"):
+        # Paid offline. Flag it so somebody actually hands the money back.
+        await _record_refund(
+            booking, payment, amount=refundable, provider="manual",
+            reference=None, status="pending", reason=reason,
+        )
+        return {"refunded": False, "pending": True, "reason": "offline payment, refund by hand"}
+
+    try:
+        refund = await razorpay_service.create_refund(
+            payment_id=payment["provider_reference"],
+            amount_rupees=refundable,
+            notes={"booking": booking.get("booking_id", ""), "reason": reason[:200]},
+        )
+    except Exception:
+        logger.exception("Refund failed for booking %s", booking.get("booking_id"))
+        await _record_refund(
+            booking, payment, amount=refundable, provider="razorpay",
+            reference=None, status="pending", reason=reason,
+        )
+        return {"refunded": False, "pending": True, "reason": "gateway refund failed, queued"}
+
+    await _record_refund(
+        booking, payment, amount=refundable, provider="razorpay",
+        reference=refund.get("id"), status="processed", reason=reason,
+    )
+    return {"refunded": True, "amount": refundable, "reference": refund.get("id")}
+
+
+async def _record_refund(
+    booking: dict[str, Any],
+    payment: dict[str, Any],
+    *,
+    amount: float,
+    provider: str,
+    reference: str | None,
+    status: str,
+    reason: str,
+) -> None:
+    """Write the refund to the ledger and mark the booking.
+
+    A refund is a negative ledger row rather than an edit to the original
+    payment: the original really did happen, and an audit that erases it is
+    worse than useless.
+    """
+    now = utcnow()
+    await mongodb.payments().insert_one(
+        {
+            "booking_id": booking["_id"],
+            "booking_reference": booking.get("booking_id"),
+            "customer_id": booking["customer_id"],
+            "amount": -abs(amount),
+            "kind": "refund",
+            "status": PaymentStatus.REFUNDED.value,
+            "method": payment.get("method"),
+            "provider": provider,
+            "provider_reference": reference,
+            "refund_of": payment.get("provider_reference"),
+            "refund_state": status,
+            "note": reason or "Booking cancelled",
+            "created_at": now,
+            "updated_at": now,
+        }
+    )
+    await mongodb.bookings().update_one(
+        {"_id": booking["_id"]},
+        {
+            "$set": {
+                "advance_status": AdvanceStatus.REFUNDED.value,
+                "refund_amount": abs(amount),
+                "refund_state": status,
+                "updated_at": now,
+            }
+        },
+    )
+
+
+async def pending_refunds() -> list[dict[str, Any]]:
+    """Refunds that were queued rather than sent. Operations must clear these."""
+    cursor = mongodb.payments().find({"kind": "refund", "refund_state": "pending"})
+    return [serialize(doc) async for doc in cursor]
