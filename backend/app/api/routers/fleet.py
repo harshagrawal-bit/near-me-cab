@@ -7,7 +7,7 @@ belongs to, so it cannot claim someone else's.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, status
 
 from app.api.deps import CurrentUser, require_roles
 from app.core.rate_limit import write_rate_limit
@@ -51,6 +51,28 @@ async def my_statement(user: CurrentUser, page: int = 1, page_size: int = 20) ->
 # ---------------------------------------------------------------------------
 # Employed drivers
 # ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/wallet/withdraw",
+    dependencies=[Depends(write_rate_limit)],
+    summary="Request money back from my wallet",
+)
+async def request_withdrawal(
+    user: CurrentUser,
+    amount: float = Query(gt=0, le=1_000_000),
+    note: str | None = Query(None, max_length=200),
+) -> dict:
+    """Ask for a withdrawal. An admin settles it and approves, which is what
+    actually debits the wallet — there is no automatic payout."""
+    driver = await driver_service.require_driver_for_user(user["_id"])
+    return await wallet_service.request_withdrawal(driver["_id"], amount, note=note)
+
+
+@router.get("/wallet/withdrawals", summary="My withdrawal requests")
+async def my_withdrawals(user: CurrentUser) -> dict:
+    driver = await driver_service.require_driver_for_user(user["_id"])
+    return {"items": await wallet_service.list_withdrawals(driver["_id"])}
 
 
 @router.get("/drivers", summary="Drivers working under me")

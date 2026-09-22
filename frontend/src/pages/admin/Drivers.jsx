@@ -21,6 +21,32 @@ export default function AdminDrivers() {
   const [searchInput, setSearchInput] = useState('')
   const search = useDebounced(searchInput, 350)
   const [createOpen, setCreateOpen] = useState(false)
+  const toast = useToast()
+  const { data: withdrawals, refetch: refetchWithdrawals } = useApi(
+    () => driverService.pendingWithdrawals(),
+    [],
+  )
+  const [deciding, setDeciding] = useState(null)
+
+  async function decide(id, approved) {
+    setDeciding(id)
+    try {
+      if (approved) {
+        // Approval is what debits the wallet, so it must follow the transfer,
+        // never precede it. The copy on the button says so.
+        await driverService.approveWithdrawal(id, { reference: 'Paid by transfer' })
+        toast.success('Withdrawal approved and wallet debited.')
+      } else {
+        await driverService.rejectWithdrawal(id, { reason: 'Declined by operations' })
+        toast.success('Withdrawal declined.')
+      }
+      refetchWithdrawals()
+    } catch (err) {
+      toast.error(err?.message || 'Could not update the request.')
+    } finally {
+      setDeciding(null)
+    }
+  }
 
   const { data, loading, error, refetch } = useApi(
     () => driverService.list({ ...filters, search: search || undefined, page, page_size: 20 }),
@@ -110,6 +136,57 @@ export default function AdminDrivers() {
           </Button>
         }
       />
+
+      {withdrawals?.items?.length > 0 && (
+        <Card>
+          <CardBody>
+            <Alert
+              tone="warning"
+              title={`${withdrawals.items.length} withdrawal request(s) waiting`}
+            >
+              Transfer the money first, then approve — approving is what debits the driver's
+              wallet, so doing it beforehand shows a balance they have not received.
+            </Alert>
+            <ul className="mt-4 divide-y divide-ink-100">
+              {withdrawals.items.map((request) => (
+                <li
+                  key={request.id}
+                  className="flex flex-wrap items-center justify-between gap-3 py-3"
+                >
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-ink-900">
+                      {request.driver_name || 'Driver'} · ₹
+                      {Number(request.amount).toLocaleString('en-IN')}
+                    </p>
+                    <p className="mt-0.5 text-xs text-ink-500">
+                      {request.driver_phone ? formatPhone(request.driver_phone) : ''}
+                      {request.note ? ` · ${request.note}` : ''}
+                    </p>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      loading={deciding === request.id}
+                      onClick={() => decide(request.id, true)}
+                    >
+                      Mark paid &amp; debit
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      disabled={deciding === request.id}
+                      onClick={() => decide(request.id, false)}
+                    >
+                      Decline
+                    </Button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </CardBody>
+        </Card>
+      )}
 
       <Card>
         <CardBody className="flex flex-wrap items-end gap-3">

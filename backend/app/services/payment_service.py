@@ -310,6 +310,8 @@ async def refund_booking_advance(
     """
     booking_oid = booking["_id"]
 
+    if booking.get("advance_status") == AdvanceStatus.REFUNDED.value:
+        return {"refunded": False, "reason": "already refunded"}
     if booking.get("advance_status") != AdvanceStatus.PAID.value:
         return {"refunded": False, "reason": "no advance was paid"}
 
@@ -394,11 +396,19 @@ async def _record_refund(
             "updated_at": now,
         }
     )
+    # Only call the advance REFUNDED once the money has actually gone back.
+    # A queued refund leaves it PAID, because anything reading the booking
+    # rather than the ledger would otherwise tell the customer, and the admin,
+    # that they have been repaid when nothing has left the account yet.
     await mongodb.bookings().update_one(
         {"_id": booking["_id"]},
         {
             "$set": {
-                "advance_status": AdvanceStatus.REFUNDED.value,
+                "advance_status": (
+                    AdvanceStatus.REFUNDED.value
+                    if status == "processed"
+                    else AdvanceStatus.PAID.value
+                ),
                 "refund_amount": abs(amount),
                 "refund_state": status,
                 "updated_at": now,
@@ -410,4 +420,74 @@ async def _record_refund(
 async def pending_refunds() -> list[dict[str, Any]]:
     """Refunds that were queued rather than sent. Operations must clear these."""
     cursor = mongodb.payments().find({"kind": "refund", "refund_state": "pending"})
+    return [serialize(doc) async for doc in cursor]
+
+
+async def retry_refund(payment_oid: ObjectId | str, *, actor_id: ObjectId | str) -> dict[str, Any]:
+    """Send a refund that was queued after a failure or an offline payment.
+
+    Retrying replaces the queued row rather than adding a second one, so the
+    ledger never shows two refunds for money that went back once.
+    """
+    oid = _oid(payment_oid)
+    queued = await mongodb.payments().find_one(
+        {"_id": oid, "kind": "refund", "refund_state": "pending"}
+    )
+    if not queued:
+        raise NotFoundError("No queued refund with that id.")
+
+    booking = await mongodb.bookings().find_one({"_id": queued["booking_id"]})
+    if not booking:
+        raise NotFoundError("Booking not found.")
+
+    await mongodb.payments().delete_one({"_id": oid})
+    result = await refund_booking_advance(
+        booking, fee=0.0, reason=queued.get("note") or "Refund retried"
+    )
+    if not result.get("refunded"):
+        # refund_booking_advance has already written a fresh queued row.
+        raise ConflictError(result.get("reason") or "The refund could not be sent.")
+    return result
+
+
+async def settle_refund_manually(
+    payment_oid: ObjectId | str, *, actor_id: ObjectId | str, note: str | None = None
+) -> dict[str, Any]:
+    """Mark a queued refund as handed back outside the gateway (cash, transfer).
+
+    The row stays; only its state changes, so the audit still shows that the
+    money went back by hand rather than through Razorpay.
+    """
+    oid = _oid(payment_oid)
+    now = utcnow()
+    updated = await mongodb.payments().find_one_and_update(
+        {"_id": oid, "kind": "refund", "refund_state": "pending"},
+        {
+            "$set": {
+                "refund_state": "settled_manually",
+                "settled_by": _oid(actor_id),
+                "settled_note": note,
+                "updated_at": now,
+            }
+        },
+        return_document=True,
+    )
+    if not updated:
+        raise NotFoundError("No queued refund with that id.")
+    await mongodb.bookings().update_one(
+        {"_id": updated["booking_id"]},
+        {
+            "$set": {
+                "advance_status": AdvanceStatus.REFUNDED.value,
+                "refund_state": "settled_manually",
+                "updated_at": now,
+            }
+        },
+    )
+    return serialize(updated)
+
+
+async def stuck_intents() -> list[dict[str, Any]]:
+    """Payments taken whose side effect half-failed. Same shape of problem."""
+    cursor = mongodb.payment_intents().find({"status": "needs_attention"})
     return [serialize(doc) async for doc in cursor]

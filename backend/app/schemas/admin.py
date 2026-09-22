@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pydantic import EmailStr, Field
+from pydantic import EmailStr, Field, model_validator
 
 from app.schemas.common import ApiModel, Phone
 
@@ -51,9 +51,17 @@ class AdvanceSettings(ApiModel):
     enabled: bool = True
     percent: float = Field(default=15, ge=0, le=100)
     #: Never ask for less than this, so tiny trips still carry a real commitment.
-    min_amount: float = Field(default=0, ge=0)
+    min_amount: float = Field(default=0, ge=0, le=100_000)
     #: 0 disables the ceiling. Stops a long outstation trip demanding a fortune up front.
-    max_amount: float = Field(default=0, ge=0)
+    max_amount: float = Field(default=0, ge=0, le=100_000)
+
+    @model_validator(mode="after")
+    def _floor_below_ceiling(self) -> "AdvanceSettings":
+        # Without this an inverted pair is accepted and then silently resolved
+        # in favour of the ceiling, so the floor an admin typed does nothing.
+        if self.max_amount and self.min_amount > self.max_amount:
+            raise ValueError("Minimum advance cannot be more than the maximum.")
+        return self
 
 
 class WalletSettings(ApiModel):
@@ -66,13 +74,22 @@ class WalletSettings(ApiModel):
     reads. Changing the rule should mean changing that one function.
     """
 
-    min_balance: float = Field(default=800, ge=0)
+    #: Capped as well as floored: with no ceiling a mistyped 1000000 makes
+    #: every fleet owner ineligible at once, with no way back except the
+    #: database, because the block is exactly what stops them using the app.
+    min_balance: float = Field(default=800, ge=0, le=100_000)
     #: Share of the trip fare that must be available to accept it.
     per_ride_percent: float = Field(default=10, ge=0, le=100)
     #: Floor for the per-ride requirement.
-    per_ride_min: float = Field(default=200, ge=0)
+    per_ride_min: float = Field(default=200, ge=0, le=100_000)
     #: 0 disables the ceiling.
-    per_ride_max: float = Field(default=0, ge=0)
+    per_ride_max: float = Field(default=0, ge=0, le=100_000)
+
+    @model_validator(mode="after")
+    def _floor_below_ceiling(self) -> "WalletSettings":
+        if self.per_ride_max and self.per_ride_min > self.per_ride_max:
+            raise ValueError("Per-ride minimum cannot be more than the maximum.")
+        return self
 
 
 class SettingsPayload(ApiModel):

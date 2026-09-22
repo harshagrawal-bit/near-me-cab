@@ -228,9 +228,11 @@ async def create_booking(customer: dict[str, Any], payload: BookingCreate) -> di
         )
 
     if config.booking.auto_confirm:
-        await change_status(
+        # Through confirm_availability, not straight to CONFIRMED: the advance
+        # rule has to apply to an auto-confirmed booking too, or switching this
+        # setting on quietly stops anyone ever being asked to pay up front.
+        await confirm_availability(
             result.inserted_id,
-            BookingStatus.CONFIRMED,
             actor_id=None,
             actor_role="system",
             note="Auto-confirmed by system settings.",
@@ -357,12 +359,21 @@ def compute_advance(total_fare: float, advance_settings: Any) -> dict[str, Any]:
 
 
 async def confirm_availability(
-    booking_oid: ObjectId, *, actor_id: ObjectId, note: str | None = None
+    booking_oid: ObjectId,
+    *,
+    actor_id: ObjectId | None,
+    note: str | None = None,
+    actor_role: str = Role.ADMIN.value,
 ) -> dict[str, Any]:
-    """Admin confirms a car is available, which asks the customer for the advance.
+    """Confirm a car is available, which asks the customer for the advance.
 
     With the advance switched off in settings this goes straight to CONFIRMED,
     so the feature can be turned off without stranding bookings mid-flow.
+
+    `actor_role` exists so auto-confirm can come through here as the system
+    rather than skipping to CONFIRMED on its own — otherwise turning auto-
+    confirm on silently disables the advance, and no customer is ever asked
+    to pay one.
     """
     from app.services import settings_service
 
@@ -375,7 +386,7 @@ async def confirm_availability(
             booking,
             BookingStatus.CONFIRMED,
             actor_id=actor_id,
-            actor_role=Role.ADMIN.value,
+            actor_role=actor_role,
             note=note or "Confirmed — no advance required.",
             extra={
                 "advance_status": AdvanceStatus.NOT_REQUIRED.value,
@@ -390,7 +401,7 @@ async def confirm_availability(
         booking,
         BookingStatus.AWAITING_PAYMENT,
         actor_id=actor_id,
-        actor_role=Role.ADMIN.value,
+        actor_role=actor_role,
         note=note or f"Car available. Advance of ₹{advance['amount']:,.0f} requested.",
         extra={
             "advance_status": AdvanceStatus.PENDING.value,

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useApi } from '@/hooks/useApi'
-import { adminService, routeService } from '@/services'
+import { adminService, notificationService, paymentService, routeService } from '@/services'
 import { brand } from '@/config/brand'
 import Button from '@/components/ui/Button'
 import { Card, CardBody, CardHeader } from '@/components/ui/Card'
@@ -10,21 +10,47 @@ import { Alert, ErrorState, PageHeader } from '@/components/ui/States'
 import { SkeletonCard } from '@/components/ui/Loaders'
 import { useToast } from '@/components/ui/Toast'
 
+
+/**
+ * Preview of what the server would ask for, so an admin can see the effect of
+ * a percentage before saving it. Mirrors booking_service.compute_advance —
+ * display only; the server still computes the real figure at confirmation.
+ */
+function previewAdvance(advance, fare) {
+  if (!advance?.enabled) return 0
+  let amount = (Number(fare) * Number(advance.percent || 0)) / 100
+  amount = Math.max(amount, Number(advance.min_amount || 0))
+  const ceiling = Number(advance.max_amount || 0)
+  if (ceiling > 0) amount = Math.min(amount, ceiling)
+  return Math.round(amount)
+}
+
 export default function AdminSettings() {
   const toast = useToast()
   const { data, loading, error, refetch } = useApi(() => adminService.settings(), [])
   const { data: maps } = useApi(() => routeService.mapCapabilities(), [])
+  const { data: payMethods } = useApi(() => paymentService.methods(), [])
+  const { data: notif } = useApi(() => notificationService.list({ page_size: 1 }), [])
 
   const [company, setCompany] = useState(null)
   const [pricing, setPricing] = useState(null)
   const [booking, setBooking] = useState(null)
+  const [advance, setAdvance] = useState(null)
+  const [wallet, setWallet] = useState(null)
   const [saving, setSaving] = useState(null)
+
+  // The notifications endpoint reports which adapters the server has keys
+  // for, so this panel states what is live rather than what was true when
+  // the page was written.
+  const liveChannels = notif?.channels || []
 
   useEffect(() => {
     if (!data) return
     setCompany(data.company)
     setPricing(data.pricing)
     setBooking(data.booking)
+    setAdvance(data.advance)
+    setWallet(data.wallet)
   }, [data])
 
   if (loading || !company) return <SkeletonCard lines={10} />
@@ -368,6 +394,163 @@ export default function AdminSettings() {
 
         <Card>
           <CardHeader
+            title="Customer advance"
+            description="What a customer pays up front to turn a confirmed quote into a booking."
+          />
+          <CardBody>
+            <form
+              onSubmit={(event) => {
+                event.preventDefault()
+                save('advance', advance)
+              }}
+              className="space-y-4"
+            >
+              <Checkbox
+                label="Ask for an advance"
+                description="Off means a confirmed booking needs no payment up front."
+                checked={advance?.enabled ?? false}
+                onChange={(event) => setAdvance({ ...advance, enabled: event.target.checked })}
+              />
+
+              <div className="grid gap-4 sm:grid-cols-3">
+                <Field label="Percent of fare" htmlFor="advPercent" hint="0-100">
+                  <Input
+                    id="advPercent"
+                    type="number"
+                    min="0"
+                    max="100"
+                    step="0.5"
+                    className="tabular"
+                    value={advance?.percent ?? 0}
+                    onChange={(event) =>
+                      setAdvance({ ...advance, percent: Number(event.target.value) })
+                    }
+                  />
+                </Field>
+                <Field label="Minimum (₹)" htmlFor="advMin" hint="Never ask for less.">
+                  <Input
+                    id="advMin"
+                    type="number"
+                    min="0"
+                    className="tabular"
+                    value={advance?.min_amount ?? 0}
+                    onChange={(event) =>
+                      setAdvance({ ...advance, min_amount: Number(event.target.value) })
+                    }
+                  />
+                </Field>
+                <Field label="Maximum (₹)" htmlFor="advMax" hint="0 means no ceiling.">
+                  <Input
+                    id="advMax"
+                    type="number"
+                    min="0"
+                    className="tabular"
+                    value={advance?.max_amount ?? 0}
+                    onChange={(event) =>
+                      setAdvance({ ...advance, max_amount: Number(event.target.value) })
+                    }
+                  />
+                </Field>
+              </div>
+
+              <Alert tone="neutral">
+                A ₹{(10000).toLocaleString('en-IN')} fare would ask for{' '}
+                <strong>₹{previewAdvance(advance, 10000).toLocaleString('en-IN')}</strong> up front.
+                Changing this does not reprice bookings already waiting on an advance.
+              </Alert>
+
+              <Button type="submit" loading={saving === 'advance'}>
+                Save advance rules
+              </Button>
+            </form>
+          </CardBody>
+        </Card>
+
+        <Card>
+          <CardHeader
+            title="Driver wallet"
+            description="The security deposit a fleet owner must keep to accept trips."
+          />
+          <CardBody>
+            <form
+              onSubmit={(event) => {
+                event.preventDefault()
+                save('wallet', wallet)
+              }}
+              className="space-y-4"
+            >
+              <Field
+                label="Minimum balance (₹)"
+                htmlFor="walMin"
+                hint="Below this a driver cannot accept any trip."
+              >
+                <Input
+                  id="walMin"
+                  type="number"
+                  min="0"
+                  className="tabular"
+                  value={wallet?.min_balance ?? 0}
+                  onChange={(event) =>
+                    setWallet({ ...wallet, min_balance: Number(event.target.value) })
+                  }
+                />
+              </Field>
+
+              <div className="grid gap-4 sm:grid-cols-3">
+                <Field label="Per-trip percent" htmlFor="walPct" hint="Share of the fare held.">
+                  <Input
+                    id="walPct"
+                    type="number"
+                    min="0"
+                    max="100"
+                    step="0.5"
+                    className="tabular"
+                    value={wallet?.per_ride_percent ?? 0}
+                    onChange={(event) =>
+                      setWallet({ ...wallet, per_ride_percent: Number(event.target.value) })
+                    }
+                  />
+                </Field>
+                <Field label="Per-trip minimum (₹)" htmlFor="walRideMin">
+                  <Input
+                    id="walRideMin"
+                    type="number"
+                    min="0"
+                    className="tabular"
+                    value={wallet?.per_ride_min ?? 0}
+                    onChange={(event) =>
+                      setWallet({ ...wallet, per_ride_min: Number(event.target.value) })
+                    }
+                  />
+                </Field>
+                <Field label="Per-trip maximum (₹)" htmlFor="walRideMax" hint="0 means no ceiling.">
+                  <Input
+                    id="walRideMax"
+                    type="number"
+                    min="0"
+                    className="tabular"
+                    value={wallet?.per_ride_max ?? 0}
+                    onChange={(event) =>
+                      setWallet({ ...wallet, per_ride_max: Number(event.target.value) })
+                    }
+                  />
+                </Field>
+              </div>
+
+              <Alert tone="warning">
+                Raising the minimum balance takes effect immediately and will stop any driver
+                now below it from accepting trips until they top up.
+              </Alert>
+
+              <Button type="submit" loading={saving === 'wallet'}>
+                Save wallet rules
+              </Button>
+            </form>
+          </CardBody>
+        </Card>
+
+        <Card>
+          <CardHeader
             title="Integrations"
             description="What is actually connected in this deployment."
           />
@@ -393,13 +576,21 @@ export default function AdminSettings() {
             />
             <IntegrationRow
               label="Online payments"
-              enabled={false}
-              detail="Payments are recorded manually. The ledger is gateway-agnostic."
+              enabled={Boolean(payMethods?.online_enabled)}
+              detail={
+                payMethods?.online_enabled
+                  ? 'Razorpay is connected. Advances, balances and wallet top-ups can be paid online.'
+                  : 'Not connected. Payments are recorded manually by your team.'
+              }
             />
             <IntegrationRow
-              label="SMS / WhatsApp / Push"
-              enabled={false}
-              detail="Channel adapters exist but no provider is wired up."
+              label="SMS / WhatsApp"
+              enabled={liveChannels.some((c) => c !== 'in_app')}
+              detail={
+                liveChannels.some((c) => c !== 'in_app')
+                  ? `Live: ${liveChannels.filter((c) => c !== 'in_app').join(', ')}.`
+                  : 'Not connected. Adapters are built; add provider keys to switch them on.'
+              }
             />
 
             <Alert tone="neutral" className="mt-4">

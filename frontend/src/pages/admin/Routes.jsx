@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useApi, useDebounced, useListState } from '@/hooks/useApi'
-import { routeService } from '@/services'
+import { pricingService, routeService } from '@/services'
 import { formatDistance, formatDuration } from '@/lib/format'
 import Button from '@/components/ui/Button'
 import { Card, CardBody } from '@/components/ui/Card'
@@ -61,6 +61,14 @@ export default function AdminRoutes() {
     }
   }
 
+  // Which routes actually have a price row. Without this the table cannot
+  // distinguish a bookable route from one that will fail at the quote.
+  // GET /api/pricing returns a bare array of { route, prices } groups.
+  const { data: priceBook } = useApi(() => pricingService.list(), [])
+  const pricedRouteIds = Array.isArray(priceBook)
+    ? new Set(priceBook.filter((g) => g.prices?.length).map((g) => g.route?.id))
+    : null
+
   const columns = [
     {
       key: 'name',
@@ -72,6 +80,16 @@ export default function AdminRoutes() {
           <p className="mt-0.5 text-xs text-ink-500">
             {row.origin} → {row.destination}
           </p>
+          {/* An unpriced route is offered to customers and then fails at the
+              quote. It looked perfectly healthy in this table before. */}
+          {pricedRouteIds && !pricedRouteIds.has(row.id) && (
+            <Link
+              to="/admin/pricing"
+              className="mt-1 inline-block text-xs font-medium text-danger-700 underline"
+            >
+              No prices set — add them
+            </Link>
+          )}
         </div>
       ),
     },

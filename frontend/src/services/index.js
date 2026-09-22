@@ -85,6 +85,11 @@ export const bookingService = {
 /* ------------------------------------------------------------- drivers --- */
 
 export const driverService = {
+  pendingWithdrawals: () => api.get('/api/drivers/wallet/withdrawals/pending'),
+  approveWithdrawal: (id, params) =>
+    api.post(`/api/drivers/wallet/withdrawals/${id}/approve`, null, { params }),
+  rejectWithdrawal: (id, params) =>
+    api.post(`/api/drivers/wallet/withdrawals/${id}/reject`, null, { params }),
   me: () => api.get('/api/drivers/me'),
   updateMe: (payload) => api.patch('/api/drivers/me', payload),
   setAvailability: (isAvailable) =>
@@ -112,6 +117,9 @@ export const driverService = {
 
 /** Everything a driver or fleet owner does for themselves. */
 export const fleetService = {
+  /** Ask for money back. An admin approves, which is what actually debits. */
+  requestWithdrawal: (params) => api.post('/api/fleet/wallet/withdraw', null, { params }),
+  withdrawals: () => api.get('/api/fleet/wallet/withdrawals'),
   wallet: () => api.get('/api/fleet/wallet'),
   transactions: (params) => api.get('/api/fleet/wallet/transactions', { params }),
 
@@ -153,6 +161,11 @@ export const paymentService = {
   /** Confirm a checkout that just succeeded in the browser. The webhook is
    *  authoritative, so this is only the fast path for immediate feedback. */
   verifyCheckout: (payload) => api.post('/api/payments/razorpay/verify', payload),
+
+  /** Refunds that were queued rather than sent — money owed to customers. */
+  pendingRefunds: () => api.get('/api/payments/refunds/pending'),
+  retryRefund: (id) => api.post(`/api/payments/refunds/${id}/retry`),
+  settleRefund: (id, params) => api.post(`/api/payments/refunds/${id}/settle`, null, { params }),
 }
 
 /* ------------------------------------------------------------- coupons --- */

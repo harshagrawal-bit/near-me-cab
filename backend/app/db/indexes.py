@@ -81,6 +81,18 @@ INDEXES: dict[str, list[dict]] = {
             "partialFilterExpression": {"provider_reference": {"$type": "string"}},
         },
     ],
+    Collections.WITHDRAWAL_REQUESTS: [
+        {"keys": [("driver_id", ASCENDING), ("created_at", DESCENDING)], "name": "driver_recent"},
+        {"keys": [("status", ASCENDING), ("created_at", DESCENDING)], "name": "status_recent"},
+        # One open request per driver: without this a driver can queue several
+        # and, between approvals, withdraw more than the wallet holds.
+        {
+            "keys": [("driver_id", ASCENDING)],
+            "unique": True,
+            "name": "uniq_open_request",
+            "partialFilterExpression": {"status": "pending"},
+        },
+    ],
     Collections.PAYMENT_INTENTS: [
         # The idempotency key. One order, one intent, enforced by the database
         # rather than by whichever request happens to arrive first.

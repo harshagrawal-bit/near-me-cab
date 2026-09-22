@@ -16,6 +16,12 @@ import { startPayment } from '@/lib/razorpay'
 /** Amounts a driver most often adds, so the common case is one tap. */
 const QUICK_AMOUNTS = [500, 1000, 2000, 5000]
 
+const WITHDRAWAL_TONE = {
+  paid: 'success',
+  rejected: 'danger',
+  pending: 'warning',
+}
+
 /** How each ledger entry should read to a driver. */
 const TXN_META = {
   deposit: { label: 'Deposit added', tone: 'success' },
@@ -29,20 +35,36 @@ const TXN_META = {
 export default function DriverWallet() {
   const [page, setPage] = useState(1)
   const { data: wallet, loading, error, refetch } = useApi(() => fleetService.wallet(), [])
-  const { data: ledger, loading: ledgerLoading } = useApi(
+  const { data: ledger, loading: ledgerLoading, refetch: refetchLedger } = useApi(
     () => fleetService.transactions({ page, page_size: 20 }),
     [page],
+  )
+  const { data: withdrawals, refetch: refetchWithdrawals } = useApi(
+    () => fleetService.withdrawals(),
+    [],
   )
   const { data: payMethods } = useApi(() => paymentService.methods(), [])
   const onlineEnabled = Boolean(payMethods?.online_enabled)
   const toast = useToast()
   const [amount, setAmount] = useState('')
   const [paying, setPaying] = useState(false)
+  const [withdrawAmount, setWithdrawAmount] = useState('')
+  const [withdrawing, setWithdrawing] = useState(false)
+
+  const MIN_TOPUP = 100
+
+  function refreshAll() {
+    refetch()
+    refetchLedger()
+    refetchWithdrawals()
+  }
 
   async function topUp(value) {
     const rupees = Number(value)
-    if (!rupees || rupees <= 0) {
-      toast.error('Enter an amount to add.')
+    // Checked here as well as on the server: failing before Razorpay opens is
+    // far less confusing than a rejection after the sheet appears.
+    if (!rupees || rupees < MIN_TOPUP) {
+      toast.error(`Enter at least ${formatCurrency(MIN_TOPUP)}.`)
       return
     }
     setPaying(true)
@@ -54,12 +76,13 @@ export default function DriverWallet() {
       })
       toast.success('Deposit added to your wallet.')
       setAmount('')
-      refetch()
+      refreshAll()
     } catch (err) {
       if (err?.cancelled) return
       if (err?.pending) {
-        toast.info('Payment received. Your balance will update shortly.')
-        refetch()
+        // The webhook has almost certainly not landed yet, so refreshing now
+        // would show the old balance and read as a failure. Say so instead.
+        toast.info('Payment received. Your balance updates once the bank confirms.')
         return
       }
       toast.error(err?.message || 'The payment did not go through.')
@@ -72,6 +95,34 @@ export default function DriverWallet() {
   if (error) return <ErrorState title="Could not load your wallet" error={error} onRetry={refetch} />
 
   const shortfall = Math.max(0, (wallet.min_balance || 0) - (wallet.balance || 0))
+  // Held funds back a live trip, so they are not the driver's to take yet.
+  const availableToWithdraw = Math.max(0, (wallet.balance || 0) - (wallet.held || 0))
+  const requests = withdrawals?.items || []
+  const openRequest = requests.find((request) => request.status === 'pending')
+  const recentWithdrawals = requests.filter((request) => request.status !== 'pending').slice(0, 4)
+
+  async function requestWithdrawal() {
+    const rupees = Number(withdrawAmount)
+    if (!rupees || rupees <= 0) {
+      toast.error('Enter an amount to withdraw.')
+      return
+    }
+    if (rupees > availableToWithdraw) {
+      toast.error(`You can withdraw up to ${formatCurrency(availableToWithdraw)}.`)
+      return
+    }
+    setWithdrawing(true)
+    try {
+      await fleetService.requestWithdrawal({ amount: rupees })
+      toast.success('Withdrawal requested. The office will transfer it shortly.')
+      setWithdrawAmount('')
+      refetchWithdrawals()
+    } catch (err) {
+      toast.error(err?.message || 'Could not request the withdrawal.')
+    } finally {
+      setWithdrawing(false)
+    }
+  }
 
   return (
     <div className="space-y-5">
@@ -166,6 +217,71 @@ export default function DriverWallet() {
               operations team will add it to your wallet, where it will appear in the
               statement below.
             </p>
+          )}
+        </CardBody>
+      </Card>
+
+      <Card>
+        <CardHeader
+          title="Taking money out"
+          description="Request a withdrawal and the office transfers it to your account."
+        />
+        <CardBody>
+          {openRequest ? (
+            <Alert tone="info">
+              Withdrawal of {formatCurrency(openRequest.amount)} requested on{' '}
+              {formatShortDateTime(openRequest.created_at)}. Waiting for the office to
+              approve it. Your balance changes only once the transfer is made.
+            </Alert>
+          ) : (
+            <>
+              <p className="text-sm text-ink-600">
+                You can withdraw up to <strong>{formatCurrency(availableToWithdraw)}</strong>.
+                {(wallet.held || 0) > 0 &&
+                  ` ${formatCurrency(wallet.held)} is held against trips in progress and cannot be withdrawn yet.`}
+              </p>
+              <div className="mt-4 flex items-end gap-3">
+                <Field label="Amount" className="flex-1">
+                  <Input
+                    type="number"
+                    inputMode="numeric"
+                    min="1"
+                    placeholder="1000"
+                    value={withdrawAmount}
+                    onChange={(event) => setWithdrawAmount(event.target.value)}
+                  />
+                </Field>
+                <Button
+                  variant="secondary"
+                  loading={withdrawing}
+                  disabled={!withdrawAmount || availableToWithdraw <= 0}
+                  onClick={requestWithdrawal}
+                >
+                  Request
+                </Button>
+              </div>
+            </>
+          )}
+
+          {recentWithdrawals.length > 0 && (
+            <div className="mt-5 border-t border-ink-100 pt-4">
+              <p className="mb-2 text-xs font-medium uppercase tracking-wide text-ink-500">
+                Recent requests
+              </p>
+              <ul className="space-y-2">
+                {recentWithdrawals.map((request) => (
+                  <li key={request.id} className="flex items-center justify-between text-sm">
+                    <span className="text-ink-600">
+                      {formatCurrency(request.amount)} ·{' '}
+                      {formatShortDateTime(request.created_at)}
+                    </span>
+                    <Badge tone={WITHDRAWAL_TONE[request.status] || 'neutral'}>
+                      {titleCase(request.status)}
+                    </Badge>
+                  </li>
+                ))}
+              </ul>
+            </div>
           )}
         </CardBody>
       </Card>

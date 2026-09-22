@@ -192,7 +192,14 @@ export default function AdminBookingDetail() {
                           {payment.note ? ` · ${payment.note}` : ''}
                         </p>
                       </div>
-                      <StatusBadge kind="payment" status={payment.status} dot={false} />
+                      {/* A queued refund still reads status "refunded", so the
+                          badge alone would assert the customer has their money
+                          back when nothing has left the account. */}
+                      {payment.kind === 'refund' && payment.refund_state === 'pending' ? (
+                        <Badge tone="warning">Refund not sent</Badge>
+                      ) : (
+                        <StatusBadge kind="payment" status={payment.status} dot={false} />
+                      )}
                     </li>
                   ))}
                 </ul>

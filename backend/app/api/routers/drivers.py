@@ -239,3 +239,46 @@ async def adjust_wallet(driver_id: str, payload: WalletAdjustment, admin: AdminU
         oid, abs(payload.amount), txn_type=WalletTxnType.ADJUSTMENT,
         note=payload.note, actor_id=str(admin["_id"]),
     )
+
+
+@router.get("/wallet/withdrawals/pending", summary="Withdrawal requests awaiting a decision (admin)")
+async def pending_withdrawals(admin: AdminUser) -> dict:
+    items = await wallet_service.list_withdrawals(status="pending")
+    for item in items:
+        driver = await mongodb.drivers().find_one(
+            {"_id": object_id(item["driver_id"], "driver_id")}, {"user_id": 1}
+        )
+        if driver:
+            user = await mongodb.users().find_one(
+                {"_id": driver["user_id"]}, {"name": 1, "phone": 1}
+            )
+            item["driver_name"] = (user or {}).get("name")
+            item["driver_phone"] = (user or {}).get("phone")
+    return {"items": items, "total": len(items)}
+
+
+@router.post(
+    "/wallet/withdrawals/{request_id}/approve",
+    dependencies=[Depends(write_rate_limit)],
+    summary="Approve a withdrawal once the transfer has been made (admin)",
+)
+async def approve_withdrawal(
+    request_id: str, admin: AdminUser, reference: str | None = Query(None, max_length=120)
+) -> dict:
+    """Approving is what debits the wallet, so only do it after paying out."""
+    return await wallet_service.approve_withdrawal(
+        object_id(request_id, "request_id"), actor_id=admin["_id"], reference=reference
+    )
+
+
+@router.post(
+    "/wallet/withdrawals/{request_id}/reject",
+    dependencies=[Depends(write_rate_limit)],
+    summary="Decline a withdrawal request (admin)",
+)
+async def reject_withdrawal(
+    request_id: str, admin: AdminUser, reason: str | None = Query(None, max_length=300)
+) -> dict:
+    return await wallet_service.reject_withdrawal(
+        object_id(request_id, "request_id"), actor_id=admin["_id"], reason=reason
+    )

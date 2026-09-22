@@ -348,3 +348,135 @@ async def reconcile(driver_id: ObjectId | str) -> dict[str, Any]:
         "open_holds": round(open_holds, 2),
         "held_matches": abs(stored_held - open_holds) < 0.01,
     }
+
+
+# ---------------------------------------------------------------------------
+# Withdrawals
+# ---------------------------------------------------------------------------
+#
+# Money does not leave on a driver's say-so. There is no payout integration, so
+# a withdrawal is a *request* an admin settles by an actual bank transfer and
+# then approves here. Approving is what debits the wallet, which keeps the
+# ledger honest: the balance only drops when the money really moved.
+
+
+async def request_withdrawal(
+    driver_id: ObjectId | str, amount: float, *, note: str | None = None
+) -> dict[str, Any]:
+    """Ask for money back. Held funds are not available and neither is a second
+    open request."""
+    oid = _oid(driver_id)
+    driver = await _driver(oid)
+
+    amount = round(float(amount), 2)
+    if amount <= 0:
+        raise ValidationError("Enter an amount to withdraw.")
+
+    balance = float(driver.get("wallet_balance") or 0)
+    held = float(driver.get("wallet_held") or 0)
+    available = round(balance - held, 2)
+    if amount > available:
+        raise ValidationError(
+            f"You can withdraw up to ₹{available:,.0f}. "
+            f"₹{held:,.0f} is held against trips in progress."
+        )
+
+    existing = await mongodb.withdrawal_requests().find_one(
+        {"driver_id": oid, "status": "pending"}
+    )
+    if existing:
+        raise ConflictError("You already have a withdrawal request waiting for approval.")
+
+    now = utcnow()
+    doc = {
+        "driver_id": oid,
+        "amount": amount,
+        "status": "pending",
+        "note": note,
+        "created_at": now,
+        "updated_at": now,
+    }
+    result = await mongodb.withdrawal_requests().insert_one(doc)
+    doc["_id"] = result.inserted_id
+    return serialize(doc)
+
+
+async def list_withdrawals(
+    driver_id: ObjectId | str | None = None, status: str | None = None
+) -> list[dict[str, Any]]:
+    query: dict[str, Any] = {}
+    if driver_id is not None:
+        query["driver_id"] = _oid(driver_id)
+    if status:
+        query["status"] = status
+    cursor = mongodb.withdrawal_requests().find(query).sort("created_at", -1).limit(200)
+    return [serialize(doc) async for doc in cursor]
+
+
+async def approve_withdrawal(
+    request_id: ObjectId | str, *, actor_id: ObjectId | str, reference: str | None = None
+) -> dict[str, Any]:
+    """Debit the wallet once the transfer has actually been made.
+
+    Availability is re-checked here, not trusted from request time: holds may
+    have been placed while the request sat in the queue.
+    """
+    oid = _oid(request_id)
+    request = await mongodb.withdrawal_requests().find_one({"_id": oid, "status": "pending"})
+    if not request:
+        raise NotFoundError("No pending withdrawal request with that id.")
+
+    driver = await _driver(request["driver_id"])
+    available = round(
+        float(driver.get("wallet_balance") or 0) - float(driver.get("wallet_held") or 0), 2
+    )
+    if float(request["amount"]) > available:
+        raise ConflictError(
+            f"Only ₹{available:,.0f} is available now — funds were held after this request."
+        )
+
+    await debit(
+        request["driver_id"],
+        float(request["amount"]),
+        txn_type=WalletTxnType.WITHDRAWAL,
+        note=reference or "Withdrawal paid out",
+        actor_id=str(actor_id),
+    )
+    now = utcnow()
+    updated = await mongodb.withdrawal_requests().find_one_and_update(
+        {"_id": oid, "status": "pending"},
+        {
+            "$set": {
+                "status": "paid",
+                "reference": reference,
+                "decided_by": _oid(actor_id),
+                "decided_at": now,
+                "updated_at": now,
+            }
+        },
+        return_document=True,
+    )
+    return serialize(updated)
+
+
+async def reject_withdrawal(
+    request_id: ObjectId | str, *, actor_id: ObjectId | str, reason: str | None = None
+) -> dict[str, Any]:
+    """Decline a request. Nothing is debited, so nothing needs undoing."""
+    now = utcnow()
+    updated = await mongodb.withdrawal_requests().find_one_and_update(
+        {"_id": _oid(request_id), "status": "pending"},
+        {
+            "$set": {
+                "status": "rejected",
+                "decision_reason": reason,
+                "decided_by": _oid(actor_id),
+                "decided_at": now,
+                "updated_at": now,
+            }
+        },
+        return_document=True,
+    )
+    if not updated:
+        raise NotFoundError("No pending withdrawal request with that id.")
+    return serialize(updated)

@@ -61,6 +61,7 @@ class Collections:
     COUNTERS = "counters"
     WALLET_TRANSACTIONS = "wallet_transactions"
     PAYMENT_INTENTS = "payment_intents"
+    WITHDRAWAL_REQUESTS = "withdrawal_requests"
 
 
 def collection(name: str) -> AsyncIOMotorCollection:
@@ -126,3 +127,7 @@ def wallet_transactions() -> AsyncIOMotorCollection:
 
 def payment_intents() -> AsyncIOMotorCollection:
     return collection(Collections.PAYMENT_INTENTS)
+
+
+def withdrawal_requests() -> AsyncIOMotorCollection:
+    return collection(Collections.WITHDRAWAL_REQUESTS)

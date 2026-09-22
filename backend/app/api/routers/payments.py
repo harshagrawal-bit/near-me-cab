@@ -17,7 +17,7 @@ from app.core.rate_limit import write_rate_limit
 from app.core.errors import AuthError
 from app.db import mongodb
 from app.models.enums import PaymentStatus, Role
-from app.schemas.common import build_page, object_id, serialize
+from app.schemas.common import Message, build_page, object_id, serialize
 from app.schemas.payment import (
     CheckoutCallback,
     PaymentApplied,
@@ -36,11 +36,20 @@ async def list_payments(
     admin: AdminUser,
     page_params: Pagination,
     status_filter: str | None = Query(None, alias="status"),
+    kind: str | None = Query(None, max_length=20),
+    refund_state: str | None = Query(None, max_length=20),
     search: str | None = Query(None, max_length=60),
 ) -> dict:
     query: dict = {}
     if status_filter:
         query["status"] = status_filter
+    # `status` is a poor discriminator for refunds: a queued refund and a sent
+    # one both read "refunded", and a manually recorded payment can too. These
+    # two filter on what actually differs.
+    if kind:
+        query["kind"] = kind
+    if refund_state:
+        query["refund_state"] = refund_state
     if search:
         query["booking_reference"] = {"$regex": search.strip(), "$options": "i"}
 
@@ -198,3 +207,56 @@ async def razorpay_webhook(
             )
 
     return {"status": "ok"}
+
+
+# ---------------------------------------------------------------------------
+# Refunds that need a human
+# ---------------------------------------------------------------------------
+
+
+@router.get("/refunds/pending", summary="Refunds queued but not yet sent (admin)")
+async def queued_refunds(admin: AdminUser) -> dict:
+    """Money owed to customers that has not left the account.
+
+    A refund lands here when the gateway call failed or the advance was paid
+    offline. Without this route the queue is invisible, which is the worst
+    possible failure mode for money owed: silent.
+    """
+    refunds = await payment_service.pending_refunds()
+    for refund in refunds:
+        booking = await mongodb.bookings().find_one(
+            {"_id": object_id(refund["booking_id"], "booking_id")},
+            {"booking_id": 1, "customer_id": 1},
+        )
+        if booking:
+            customer = await mongodb.users().find_one(
+                {"_id": booking["customer_id"]}, {"name": 1, "phone": 1}
+            )
+            refund["customer_name"] = (customer or {}).get("name")
+            refund["customer_phone"] = (customer or {}).get("phone")
+    return {"items": refunds, "total": len(refunds), "stuck_payments": await payment_service.stuck_intents()}
+
+
+@router.post(
+    "/refunds/{payment_id}/retry",
+    dependencies=[Depends(write_rate_limit)],
+    summary="Send a queued refund again (admin)",
+)
+async def retry_queued_refund(payment_id: str, admin: AdminUser) -> dict:
+    return await payment_service.retry_refund(
+        object_id(payment_id, "payment_id"), actor_id=admin["_id"]
+    )
+
+
+@router.post(
+    "/refunds/{payment_id}/settle",
+    dependencies=[Depends(write_rate_limit)],
+    summary="Mark a queued refund as paid back by hand (admin)",
+)
+async def settle_queued_refund(
+    payment_id: str, admin: AdminUser, note: str | None = Query(None, max_length=300)
+) -> dict:
+    """For a refund handed back in cash or by bank transfer."""
+    return await payment_service.settle_refund_manually(
+        object_id(payment_id, "payment_id"), actor_id=admin["_id"], note=note
+    )

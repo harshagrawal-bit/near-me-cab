@@ -420,3 +420,66 @@ async def test_an_unpaid_booking_is_not_refunded(seeded):
     booking = await mongodb.bookings().find_one({"_id": booking_oid})
     result = await payment_service.refund_booking_advance(booking, fee=0.0, reason="cancelled")
     assert result["refunded"] is False
+
+
+async def test_a_queued_refund_does_not_claim_the_customer_was_paid(seeded, monkeypatch):
+    """The most misleading possible state: booking says 'refunded', money never left."""
+
+    async def boom(**_):
+        raise RuntimeError("gateway down")
+
+    monkeypatch.setattr(razorpay_service, "create_refund", boom)
+    booking = await _cancellable_booking(seeded["customer"], advance_paid=500.0)
+
+    await payment_service.refund_booking_advance(booking, fee=0.0, reason="cancelled")
+
+    updated = await mongodb.bookings().find_one({"_id": booking["_id"]})
+    assert updated["advance_status"] == AdvanceStatus.PAID.value
+    assert updated["refund_state"] == "pending"
+
+
+async def test_a_queued_refund_can_be_retried_and_then_settles(seeded, monkeypatch):
+    calls = {"n": 0}
+
+    async def flaky(**kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("gateway down")
+        return {"id": "rfnd_retry_ok"}
+
+    monkeypatch.setattr(razorpay_service, "create_refund", flaky)
+    booking = await _cancellable_booking(seeded["customer"], advance_paid=700.0)
+
+    first = await payment_service.refund_booking_advance(booking, fee=0.0, reason="cancelled")
+    assert first["pending"] is True
+
+    queued = [r for r in await payment_service.pending_refunds()
+              if r["booking_id"] == str(booking["_id"])]
+    assert len(queued) == 1
+
+    result = await payment_service.retry_refund(queued[0]["id"], actor_id=ObjectId())
+    assert result["refunded"] is True
+
+    # Exactly one refund row survives — a retry replaces, never duplicates.
+    rows = [d async for d in mongodb.payments().find(
+        {"booking_id": booking["_id"], "kind": "refund"})]
+    assert len(rows) == 1
+    updated = await mongodb.bookings().find_one({"_id": booking["_id"]})
+    assert updated["advance_status"] == AdvanceStatus.REFUNDED.value
+
+
+async def test_an_offline_refund_can_be_settled_by_hand(seeded):
+    booking = await _cancellable_booking(seeded["customer"], advance_paid=400.0, provider="manual")
+    await payment_service.refund_booking_advance(booking, fee=0.0, reason="cancelled")
+
+    queued = [r for r in await payment_service.pending_refunds()
+              if r["booking_id"] == str(booking["_id"])]
+    settled = await payment_service.settle_refund_manually(
+        queued[0]["id"], actor_id=ObjectId(), note="Cash returned at office"
+    )
+
+    assert settled["refund_state"] == "settled_manually"
+    updated = await mongodb.bookings().find_one({"_id": booking["_id"]})
+    assert updated["advance_status"] == AdvanceStatus.REFUNDED.value
+    assert not [r for r in await payment_service.pending_refunds()
+                if r["booking_id"] == str(booking["_id"])]

@@ -62,12 +62,24 @@ async def get_public_settings() -> dict[str, Any]:
 
 
 async def update_settings(update: SettingsUpdate) -> dict[str, Any]:
-    await get_settings_doc()
+    """Merge the sections a caller actually sent into the stored document.
+
+    The merge is per *field*, not per section. Each section model carries a
+    default for every field, so `model_dump()` of `{"wallet": {"min_balance":
+    1500}}` is a complete WalletSettings with every other field silently reset
+    to its default — saving one knob from a form would quietly wipe the rest of
+    that group. `exclude_unset` keeps only what the caller named, and the stored
+    values fill the gaps.
+    """
+    current = await get_settings_doc()
     changes: dict[str, Any] = {"updated_at": utcnow()}
     for section in ("company", "pricing", "booking", "advance", "wallet"):
         value = getattr(update, section)
-        if value is not None:
-            changes[section] = value.model_dump()
+        if value is None:
+            continue
+        merged = dict(current.get(section) or {})
+        merged.update(value.model_dump(exclude_unset=True))
+        changes[section] = merged
     await mongodb.admin_settings().update_one({"key": SETTINGS_KEY}, {"$set": changes})
     doc = await get_settings_doc()
     return serialize(doc)
