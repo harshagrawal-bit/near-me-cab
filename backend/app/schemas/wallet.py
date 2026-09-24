@@ -171,3 +171,43 @@ class BookingAcceptance(ApiModel):
 
     vehicle_id: str = Field(min_length=24, max_length=24)
     driver_id: str = Field(min_length=24, max_length=24)
+
+
+class BankDetails(ApiModel):
+    """Where a driver's withdrawals and payouts are actually sent.
+
+    Razorpay can only refund money back down the path it arrived on, so it
+    cannot be used to pay a driver who never paid us. Payouts are therefore a
+    bank transfer the office makes, and these are the details it needs.
+
+    Stored as given. The account number is masked on the way out, so support
+    staff can confirm the last four digits without the whole number being
+    readable on every screen.
+    """
+
+    account_name: str = Field(min_length=2, max_length=120)
+    account_number: str = Field(min_length=6, max_length=24, pattern=r"^[0-9]+$")
+    ifsc: str = Field(min_length=11, max_length=11, pattern=r"^[A-Za-z]{4}0[A-Za-z0-9]{6}$")
+    bank_name: str | None = Field(default=None, max_length=120)
+    upi_id: str | None = Field(default=None, max_length=120)
+
+
+class DriverPayout(ApiModel):
+    """An admin paying a driver their share of a trip.
+
+    The amount is the admin's decision, not a computed split: what a driver is
+    owed on a given trip is a commercial call that varies by route, vehicle and
+    agreement, and pretending otherwise would bake one deal into the code.
+    """
+
+    amount: float = Field(gt=0, le=1_000_000)
+    booking_id: str | None = Field(default=None, max_length=40)
+    note: str | None = Field(default=None, max_length=300)
+
+
+class PenaltyCharge(ApiModel):
+    """A manual penalty or a reversal of one."""
+
+    amount: float = Field(gt=0, le=100_000)
+    reason: str = Field(min_length=3, max_length=300)
+    booking_id: str | None = Field(default=None, max_length=40)

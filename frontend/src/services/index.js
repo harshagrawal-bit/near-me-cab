@@ -74,6 +74,8 @@ export const bookingService = {
   assignDriver: (id, payload) => api.post(`/api/bookings/${id}/assign-driver`, payload),
   overrideFare: (id, payload) => api.post(`/api/bookings/${id}/fare`, payload),
   recordPayment: (id, payload) => api.post(`/api/bookings/${id}/payments`, payload),
+  /** Driver drops a trip they accepted. Charges a penalty to their wallet. */
+  driverCancel: (id, payload) => api.post(`/api/bookings/${id}/driver-cancel`, payload),
   setPaymentStatus: (id, payload) => api.post(`/api/bookings/${id}/payment-status`, payload),
 
   /** Admin confirms a car is free, which asks the customer for the advance. */
@@ -85,6 +87,9 @@ export const bookingService = {
 /* ------------------------------------------------------------- drivers --- */
 
 export const driverService = {
+  walletsOverview: (params) => api.get('/api/drivers/wallets/overview', { params }),
+  payout: (id, payload) => api.post(`/api/drivers/${id}/wallet/payout`, payload),
+  penalty: (id, payload) => api.post(`/api/drivers/${id}/wallet/penalty`, payload),
   pendingWithdrawals: () => api.get('/api/drivers/wallet/withdrawals/pending'),
   approveWithdrawal: (id, params) =>
     api.post(`/api/drivers/wallet/withdrawals/${id}/approve`, null, { params }),
@@ -116,7 +121,15 @@ export const driverService = {
 /* --------------------------------------------------------------- fleet --- */
 
 /** Everything a driver or fleet owner does for themselves. */
+export const legalService = {
+  privacy: () => api.get('/api/legal/privacy'),
+  terms: () => api.get('/api/legal/terms'),
+  vendorTerms: () => api.get('/api/legal/vendor-terms'),
+}
+
 export const fleetService = {
+  bankDetails: () => api.get('/api/fleet/bank-details'),
+  saveBankDetails: (payload) => api.put('/api/fleet/bank-details', payload),
   /** Ask for money back. An admin approves, which is what actually debits. */
   requestWithdrawal: (params) => api.post('/api/fleet/wallet/withdraw', null, { params }),
   withdrawals: () => api.get('/api/fleet/wallet/withdrawals'),

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '@/auth/AuthContext'
 import { useApi } from '@/hooks/useApi'
-import { bookingService, pricingService } from '@/services'
+import { bookingService, pricingService, userService } from '@/services'
 import { TRIP_TYPES } from '@/lib/constants'
 import { combineDateTime, formatShortDateTime } from '@/lib/format'
 import Button from '@/components/ui/Button'
@@ -12,6 +12,7 @@ import { Alert, EmptyState, ErrorState, PageHeader } from '@/components/ui/State
 import { SkeletonCard } from '@/components/ui/Loaders'
 import { IconChevronLeft } from '@/components/ui/Icons'
 import FareSummary from '@/components/booking/FareSummary'
+import PaymentOptions from '@/components/booking/PaymentOptions'
 import { useToast } from '@/components/ui/Toast'
 
 const PHONE_RE = /^[6-9]\d{9}$/
@@ -21,6 +22,10 @@ export default function BookingForm() {
   const navigate = useNavigate()
   const { user } = useAuth()
   const toast = useToast()
+  // The rules the server will actually apply, so the choices shown here match
+  // what it charges rather than a copy that can drift.
+  const { data: appSettings } = useApi(() => userService.appSettings(), [])
+  const [paymentOption, setPaymentOption] = useState('part')
 
   const routeId = params.get('route_id')
   const tripType = params.get('trip_type') || 'one_way'
@@ -113,6 +118,7 @@ export default function BookingForm() {
         notes: form.notes.trim() || undefined,
         coupon_code: coupon || undefined,
         payment_method: form.paymentMethod,
+        payment_option: paymentOption,
       })
       toast.success('Booking requested. We will confirm shortly.')
       navigate(`/app/bookings/${booking.id}?new=1`, { replace: true })
@@ -350,9 +356,33 @@ export default function BookingForm() {
               <div className="border-t border-ink-100 pt-3">
                 <FareSummary breakdown={option.breakdown} total={option.fare} compact />
               </div>
+              <div className="border-t border-ink-100 pt-4">
+                <p className="mb-2.5 text-sm font-semibold text-ink-900">How would you like to pay?</p>
+                <PaymentOptions
+                  total={option.fare}
+                  advancePercent={appSettings?.advance?.percent ?? 15}
+                  settings={appSettings?.payment_options}
+                  value={paymentOption}
+                  onChange={setPaymentOption}
+                />
+              </div>
+
+              {appSettings?.cancellation && (
+                <div className="flex items-start gap-2 rounded-lg bg-amber-50 p-3 ring-1 ring-amber-200">
+                  <span aria-hidden="true" className="text-base leading-none">🕑</span>
+                  <p className="text-xs leading-relaxed text-amber-900">
+                    <strong className="font-semibold">
+                      Free cancellation until {appSettings.cancellation.customer_free_hours} hours
+                      before pickup.
+                    </strong>{' '}
+                    After that we keep {Math.round(appSettings.cancellation.customer_fee_percent)}%
+                    of what you have paid and refund the rest.
+                  </p>
+                </div>
+              )}
+
               <p className="text-xs text-ink-500">
-                The final fare is confirmed by our team. You will only be asked to pay after
-                the trip.
+                Our team confirms the vehicle before anything is charged.
               </p>
             </CardBody>
           </Card>

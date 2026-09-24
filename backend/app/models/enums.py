@@ -75,6 +75,10 @@ class WalletTxnType(StrEnum):
     RELEASE = "release"
     COMMISSION = "commission"
     ADJUSTMENT = "adjustment"
+    #: Charged to a driver who drops a trip they had accepted.
+    PENALTY = "penalty"
+    #: The driver's share of a trip, paid out by the office.
+    PAYOUT = "payout"
 
 
 class AdvanceStatus(StrEnum):

@@ -38,3 +38,6 @@ Thumbs.db
 .data/
 logs/
 *.log
+
+# Reference screenshots shared for design work, not part of the app.
+WhatsApp*/

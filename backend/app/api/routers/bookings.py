@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, Query, status
 from app.api.deps import (
     AdminUser,
     BookingFilterParams,
+    CurrentDriver,
     CurrentUser,
     CustomerUser,
     Pagination,
@@ -81,6 +82,7 @@ async def list_bookings(
         extra_query=extra,
         sort_field=sort_field,
         sort_direction=sort_direction,
+        viewer_role=user["role"],
     )
 
 
@@ -225,4 +227,19 @@ async def set_payment_status(
         payload.payment_status,
         actor_id=admin["_id"],
         note=payload.note,
+    )
+
+
+@router.post(
+    "/{booking_id}/driver-cancel",
+    dependencies=[Depends(write_rate_limit)],
+    summary="Driver drops a trip they accepted (charges a penalty)",
+)
+async def driver_cancel(
+    booking_id: str, payload: BookingCancel, driver: CurrentDriver
+) -> dict:
+    """The trip returns to the pool for another driver rather than being
+    killed off — the customer still wants it."""
+    return await booking_service.driver_cancel(
+        object_id(booking_id, "booking_id"), driver, payload.reason
     )

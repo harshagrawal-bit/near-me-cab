@@ -39,6 +39,9 @@ async def get_settings() -> SettingsPayload:
         # forcing a migration.
         advance=doc.get("advance") or {},
         wallet=doc.get("wallet") or {},
+        cancellation=doc.get("cancellation") or {},
+        payment_options=doc.get("payment_options") or {},
+        privacy=doc.get("privacy") or {},
     )
 
 
@@ -58,6 +61,11 @@ async def get_public_settings() -> dict[str, Any]:
         # read-only here, and only the server ever applies them.
         "advance": payload.advance.model_dump(),
         "wallet": payload.wallet.model_dump(),
+        # Customers must be able to see the cancellation rule and their payment
+        # choices before they commit, not discover them afterwards.
+        "cancellation": payload.cancellation.model_dump(),
+        "payment_options": payload.payment_options.model_dump(),
+        "privacy": payload.privacy.model_dump(),
     }
 
 
@@ -73,7 +81,16 @@ async def update_settings(update: SettingsUpdate) -> dict[str, Any]:
     """
     current = await get_settings_doc()
     changes: dict[str, Any] = {"updated_at": utcnow()}
-    for section in ("company", "pricing", "booking", "advance", "wallet"):
+    for section in (
+        "company",
+        "pricing",
+        "booking",
+        "advance",
+        "wallet",
+        "cancellation",
+        "payment_options",
+        "privacy",
+    ):
         value = getattr(update, section)
         if value is None:
             continue

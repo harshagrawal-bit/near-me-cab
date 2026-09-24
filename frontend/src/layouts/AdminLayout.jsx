@@ -25,6 +25,7 @@ const NAV = [
   { to: '/admin', label: 'Dashboard', icon: IconHome, end: true },
   { to: '/admin/bookings', label: 'Bookings', icon: IconTicket },
   { to: '/admin/drivers', label: 'Drivers', icon: IconUsers },
+  { to: '/admin/driver-wallets', label: 'Driver wallets', icon: IconWallet },
   { to: '/admin/customers', label: 'Customers', icon: IconUsers },
   { to: '/admin/vehicles', label: 'Vehicles', icon: IconCar },
   { to: '/admin/routes', label: 'Routes', icon: IconRoute },

@@ -14,6 +14,7 @@ from app.core.rate_limit import write_rate_limit
 from app.models.enums import Role
 from app.schemas.common import Message, object_id
 from app.schemas.wallet import (
+    BankDetails,
     BookingAcceptance,
     DocumentUpload,
     OwnerVehicleCreate,
@@ -73,6 +74,24 @@ async def request_withdrawal(
 async def my_withdrawals(user: CurrentUser) -> dict:
     driver = await driver_service.require_driver_for_user(user["_id"])
     return {"items": await wallet_service.list_withdrawals(driver["_id"])}
+
+
+@router.get("/bank-details", summary="My payout account")
+async def my_bank_details(user: CurrentUser) -> dict:
+    driver = await driver_service.require_driver_for_user(user["_id"])
+    return {"bank_details": wallet_service.mask_bank_details(driver.get("bank_details"))}
+
+
+@router.put(
+    "/bank-details",
+    dependencies=[Depends(write_rate_limit)],
+    summary="Set where my withdrawals are paid",
+)
+async def set_bank_details(payload: BankDetails, user: CurrentUser) -> dict:
+    """Needed because a gateway refund can only send money back the way it
+    came. Paying a driver who never paid us is a bank transfer, not a refund."""
+    driver = await driver_service.require_driver_for_user(user["_id"])
+    return {"bank_details": await wallet_service.set_bank_details(driver["_id"], payload)}
 
 
 @router.get("/drivers", summary="Drivers working under me")

@@ -104,6 +104,10 @@ class BookingCreate(ApiModel):
     notes: str | None = Field(default=None, max_length=500)
     coupon_code: str | None = Field(default=None, max_length=24)
     payment_method: PaymentMethod = PaymentMethod.CASH
+    #: pay_later | part | full. Chooses how much is asked for up front; the
+    #: server still derives the actual figure, so this names an option, never
+    #: an amount.
+    payment_option: str = Field(default="part", max_length=12)
 
     @field_validator("coupon_code")
     @classmethod

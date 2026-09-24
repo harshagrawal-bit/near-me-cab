@@ -480,3 +480,154 @@ async def reject_withdrawal(
     if not updated:
         raise NotFoundError("No pending withdrawal request with that id.")
     return serialize(updated)
+
+
+# ---------------------------------------------------------------------------
+# Penalties and payouts
+# ---------------------------------------------------------------------------
+
+
+def penalty_for_cancellation(
+    *, accepted_at: Any, scheduled_at: Any, settings: Any, now: Any
+) -> dict[str, Any]:
+    """What a driver owes for dropping a trip they had accepted.
+
+    Time-based, because the cost to the business is: a drop seconds after
+    accepting is an honest mistake, one an hour before pickup strands a
+    customer who has no time to rebook. Returns the reason alongside the
+    amount so the driver is told why, not just charged.
+    """
+    hours_to_pickup = None
+    if scheduled_at is not None:
+        hours_to_pickup = (scheduled_at - now).total_seconds() / 3600
+
+    if hours_to_pickup is not None and hours_to_pickup <= float(settings.driver_late_hours):
+        return {
+            "amount": round(float(settings.driver_critical_penalty), 2),
+            "reason": (
+                f"Cancelled within {settings.driver_late_hours} hour(s) of pickup, "
+                "leaving no time to arrange another car."
+            ),
+            "band": "critical",
+        }
+
+    if accepted_at is not None:
+        minutes_since_accept = (now - accepted_at).total_seconds() / 60
+        if minutes_since_accept <= float(settings.driver_grace_minutes):
+            return {
+                "amount": round(float(settings.driver_grace_penalty), 2),
+                "reason": (
+                    f"Cancelled within {settings.driver_grace_minutes} minutes of accepting."
+                ),
+                "band": "grace",
+            }
+
+    return {
+        "amount": round(float(settings.driver_late_penalty), 2),
+        "reason": "Cancelled after accepting the trip.",
+        "band": "late",
+    }
+
+
+async def charge_penalty(
+    driver_id: ObjectId | str,
+    amount: float,
+    *,
+    reason: str,
+    booking_id: ObjectId | None = None,
+    actor_id: str | None = None,
+) -> dict[str, Any]:
+    """Take a penalty out of the wallet.
+
+    Allowed to push the balance below the minimum — that is the point. A driver
+    who owes money should be blocked from taking new work until they top up,
+    which `eligibility` already enforces off the same balance.
+    """
+    if amount <= 0:
+        return {"charged": False, "amount": 0.0}
+    oid = _oid(driver_id)
+    driver = await _driver(oid)
+
+    updated = await mongodb.drivers().find_one_and_update(
+        {"_id": oid},
+        {"$inc": {"wallet_balance": -round(float(amount), 2)}, "$set": {"updated_at": utcnow()}},
+        return_document=True,
+    )
+    await _record(
+        driver_id=oid,
+        txn_type=WalletTxnType.PENALTY,
+        amount=-abs(round(float(amount), 2)),
+        balance_after=updated.get("wallet_balance", 0),
+        held_after=updated.get("wallet_held", 0),
+        booking_id=booking_id,
+        note=reason,
+        actor_id=actor_id,
+    )
+    return {
+        "charged": True,
+        "amount": round(float(amount), 2),
+        "balance_after": updated.get("wallet_balance", 0),
+        "reason": reason,
+    }
+
+
+async def pay_driver(
+    driver_id: ObjectId | str,
+    amount: float,
+    *,
+    note: str | None = None,
+    booking_id: ObjectId | None = None,
+    actor_id: str | None = None,
+) -> dict[str, Any]:
+    """Credit a driver their share of a trip.
+
+    Lands in the wallet rather than going straight to a bank account: the
+    driver can then withdraw it through the normal request flow, which keeps
+    one ledger for everything instead of two half-pictures.
+    """
+    return await credit(
+        driver_id,
+        amount,
+        txn_type=WalletTxnType.PAYOUT,
+        note=note or "Trip payout",
+        actor_id=actor_id,
+        booking_id=booking_id,
+    )
+
+
+async def set_bank_details(driver_id: ObjectId | str, payload: Any) -> dict[str, Any]:
+    details = {
+        "account_name": payload.account_name,
+        "account_number": payload.account_number,
+        "ifsc": payload.ifsc.upper(),
+        "bank_name": payload.bank_name,
+        "upi_id": payload.upi_id,
+        "updated_at": utcnow(),
+    }
+    updated = await mongodb.drivers().find_one_and_update(
+        {"_id": _oid(driver_id)},
+        {"$set": {"bank_details": details, "updated_at": utcnow()}},
+        return_document=True,
+    )
+    if not updated:
+        raise NotFoundError("Driver not found.")
+    return mask_bank_details(details)
+
+
+def mask_bank_details(details: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Only ever return the last four digits of an account number.
+
+    Enough for someone to confirm which account they are looking at, not
+    enough for a screenshot of an admin screen to be a banking leak.
+    """
+    if not details:
+        return None
+    number = str(details.get("account_number") or "")
+    return {
+        "account_name": details.get("account_name"),
+        "account_number_masked": f"••••{number[-4:]}" if len(number) >= 4 else "••••",
+        "ifsc": details.get("ifsc"),
+        "bank_name": details.get("bank_name"),
+        "upi_id": details.get("upi_id"),
+        "updated_at": details.get("updated_at"),
+    }

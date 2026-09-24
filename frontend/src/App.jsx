@@ -1,4 +1,5 @@
 import { lazy, Suspense } from 'react'
+import { legalService } from '@/services'
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { homePathFor, useAuth } from '@/auth/AuthContext'
 import ProtectedRoute from '@/auth/ProtectedRoute'
@@ -17,6 +18,7 @@ import Register from '@/pages/auth/Register'
 import DriverSignup from '@/pages/auth/DriverSignup'
 
 // Customer
+const PolicyPage = lazy(() => import('@/pages/legal/PolicyPage'))
 const CustomerHome = lazy(() => import('@/pages/customer/Home'))
 const SearchResults = lazy(() => import('@/pages/customer/SearchResults'))
 const BookingForm = lazy(() => import('@/pages/customer/BookingForm'))
@@ -42,6 +44,7 @@ const AdminDashboard = lazy(() => import('@/pages/admin/Dashboard'))
 const AdminBookings = lazy(() => import('@/pages/admin/Bookings'))
 const AdminBookingDetail = lazy(() => import('@/pages/admin/BookingDetail'))
 const AdminDrivers = lazy(() => import('@/pages/admin/Drivers'))
+const AdminDriverWallets = lazy(() => import('@/pages/admin/DriverWallets'))
 const AdminDriverDetail = lazy(() => import('@/pages/admin/DriverDetail'))
 const AdminCustomers = lazy(() => import('@/pages/admin/Customers'))
 const AdminCustomerDetail = lazy(() => import('@/pages/admin/CustomerDetail'))
@@ -72,6 +75,15 @@ export default function App() {
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
           <Route path="/driver-signup" element={<DriverSignup />} />
+
+          {/* Public: reachable without an account, because someone deciding
+              whether to sign up needs to read them first. */}
+          <Route path="/privacy" element={<PolicyPage fetcher={legalService.privacy} />} />
+          <Route path="/terms" element={<PolicyPage fetcher={legalService.terms} />} />
+          <Route
+            path="/driver-terms"
+            element={<PolicyPage fetcher={legalService.vendorTerms} />}
+          />
 
           {/* Customer */}
           <Route element={<ProtectedRoute allow={[ROLES.CUSTOMER]} />}>
@@ -109,6 +121,7 @@ export default function App() {
               <Route path="bookings" element={<AdminBookings />} />
               <Route path="bookings/:bookingId" element={<AdminBookingDetail />} />
               <Route path="drivers" element={<AdminDrivers />} />
+              <Route path="driver-wallets" element={<AdminDriverWallets />} />
               <Route path="drivers/:driverId" element={<AdminDriverDetail />} />
               <Route path="customers" element={<AdminCustomers />} />
               <Route path="customers/:customerId" element={<AdminCustomerDetail />} />

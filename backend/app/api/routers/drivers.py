@@ -13,7 +13,7 @@ from app.core.errors import ValidationError
 from app.models.enums import ACTIVE_BOOKING_STATUSES, BookingStatus, WalletTxnType
 from app.schemas.common import Message, object_id, serialize, utcnow
 from app.schemas.fleet import AvailabilityUpdate, DriverCreate, DriverSelfUpdate, DriverUpdate
-from app.schemas.wallet import WalletAdjustment, WalletTopUp
+from app.schemas.wallet import DriverPayout, PenaltyCharge, WalletAdjustment, WalletTopUp
 from app.services import booking_service, driver_service, wallet_service
 
 router = APIRouter(prefix="/drivers", tags=["drivers"])
@@ -281,4 +281,83 @@ async def reject_withdrawal(
 ) -> dict:
     return await wallet_service.reject_withdrawal(
         object_id(request_id, "request_id"), actor_id=admin["_id"], reason=reason
+    )
+
+
+@router.get("/wallets/overview", summary="Every driver's wallet at a glance (admin)")
+async def wallets_overview(
+    admin: AdminUser,
+    below_minimum: bool = Query(False),
+) -> dict:
+    """One screen for the whole fleet's money.
+
+    `below_minimum` filters to the drivers who cannot currently accept work,
+    which is the reason an operator opens this page.
+    """
+    from app.services import settings_service
+
+    floor = (await settings_service.get_settings()).wallet.min_balance
+    rows = []
+    async for driver in mongodb.drivers().find({}):
+        balance = float(driver.get("wallet_balance") or 0)
+        held = float(driver.get("wallet_held") or 0)
+        if below_minimum and balance >= floor:
+            continue
+        user = await mongodb.users().find_one(
+            {"_id": driver["user_id"]}, {"name": 1, "phone": 1}
+        )
+        rows.append(
+            {
+                "driver_id": str(driver["_id"]),
+                "name": (user or {}).get("name"),
+                "phone": (user or {}).get("phone"),
+                "driver_type": driver.get("driver_type"),
+                "balance": round(balance, 2),
+                "held": round(held, 2),
+                "available": round(balance - held, 2),
+                "below_minimum": balance < floor,
+                "bank_details": wallet_service.mask_bank_details(driver.get("bank_details")),
+            }
+        )
+    rows.sort(key=lambda r: r["balance"])
+    return {
+        "items": rows,
+        "total": len(rows),
+        "minimum_balance": floor,
+        "below_minimum_count": sum(1 for r in rows if r["below_minimum"]),
+    }
+
+
+@router.post(
+    "/{driver_id}/wallet/payout",
+    dependencies=[Depends(write_rate_limit)],
+    summary="Pay a driver their share of a trip (admin)",
+)
+async def pay_driver(driver_id: str, payload: DriverPayout, admin: AdminUser) -> dict:
+    """Credits the wallet rather than the bank directly.
+
+    The driver withdraws it through the normal request flow, so every movement
+    stays in one ledger instead of two half-pictures.
+    """
+    return await wallet_service.pay_driver(
+        object_id(driver_id, "driver_id"),
+        payload.amount,
+        note=payload.note or "Trip payout",
+        booking_id=object_id(payload.booking_id, "booking_id") if payload.booking_id else None,
+        actor_id=str(admin["_id"]),
+    )
+
+
+@router.post(
+    "/{driver_id}/wallet/penalty",
+    dependencies=[Depends(write_rate_limit)],
+    summary="Charge a penalty to a driver's wallet (admin)",
+)
+async def charge_penalty(driver_id: str, payload: PenaltyCharge, admin: AdminUser) -> dict:
+    return await wallet_service.charge_penalty(
+        object_id(driver_id, "driver_id"),
+        payload.amount,
+        reason=payload.reason,
+        booking_id=object_id(payload.booking_id, "booking_id") if payload.booking_id else None,
+        actor_id=str(admin["_id"]),
     )

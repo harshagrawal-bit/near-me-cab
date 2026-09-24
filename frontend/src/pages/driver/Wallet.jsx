@@ -12,6 +12,7 @@ import Button from '@/components/ui/Button'
 import { Field, Input } from '@/components/ui/Field'
 import { useToast } from '@/components/ui/Toast'
 import { startPayment } from '@/lib/razorpay'
+import { Modal } from '@/components/ui/Modal'
 
 /** Amounts a driver most often adds, so the common case is one tap. */
 const QUICK_AMOUNTS = [500, 1000, 2000, 5000]
@@ -43,6 +44,7 @@ export default function DriverWallet() {
     () => fleetService.withdrawals(),
     [],
   )
+  const { data: bank, refetch: refetchBank } = useApi(() => fleetService.bankDetails(), [])
   const { data: payMethods } = useApi(() => paymentService.methods(), [])
   const onlineEnabled = Boolean(payMethods?.online_enabled)
   const toast = useToast()
@@ -50,6 +52,7 @@ export default function DriverWallet() {
   const [paying, setPaying] = useState(false)
   const [withdrawAmount, setWithdrawAmount] = useState('')
   const [withdrawing, setWithdrawing] = useState(false)
+  const [bankOpen, setBankOpen] = useState(false)
 
   const MIN_TOPUP = 100
 
@@ -287,6 +290,55 @@ export default function DriverWallet() {
       </Card>
 
       <Card>
+        <CardHeader
+          title="Payout account"
+          description="Where your withdrawals and trip payouts are sent."
+        />
+        <CardBody>
+          {bank?.bank_details ? (
+            <div className="space-y-1.5 text-sm">
+              <div className="flex justify-between gap-3">
+                <span className="text-ink-500">Account</span>
+                <span className="font-mono font-medium text-ink-900">
+                  {bank.bank_details.account_number_masked}
+                </span>
+              </div>
+              <div className="flex justify-between gap-3">
+                <span className="text-ink-500">Name</span>
+                <span className="font-medium text-ink-900">
+                  {bank.bank_details.account_name}
+                </span>
+              </div>
+              <div className="flex justify-between gap-3">
+                <span className="text-ink-500">IFSC</span>
+                <span className="font-mono font-medium text-ink-900">
+                  {bank.bank_details.ifsc}
+                </span>
+              </div>
+              <Button
+                variant="secondary"
+                size="sm"
+                className="mt-3"
+                onClick={() => setBankOpen(true)}
+              >
+                Change account
+              </Button>
+            </div>
+          ) : (
+            <>
+              <Alert tone="warning">
+                Add your bank account so we can pay you. Without it a withdrawal cannot be
+                transferred.
+              </Alert>
+              <Button variant="brand" className="mt-3" onClick={() => setBankOpen(true)}>
+                Add bank account
+              </Button>
+            </>
+          )}
+        </CardBody>
+      </Card>
+
+      <Card>
         <CardHeader title="Statement" description="Every movement in and out of your wallet." />
         <CardBody>
           {ledgerLoading ? (
@@ -360,6 +412,101 @@ export default function DriverWallet() {
           )}
         </CardBody>
       </Card>
+      {bankOpen && (
+        <BankDetailsModal
+          current={bank?.bank_details}
+          onClose={() => setBankOpen(false)}
+          onSaved={() => {
+            setBankOpen(false)
+            refetchBank()
+            toast.success('Payout account saved.')
+          }}
+        />
+      )}
     </div>
+  )
+}
+
+
+function BankDetailsModal({ current, onClose, onSaved }) {
+  const toast = useToast()
+  const [form, setForm] = useState({
+    account_name: current?.account_name || '',
+    account_number: '',
+    ifsc: current?.ifsc || '',
+    bank_name: current?.bank_name || '',
+    upi_id: current?.upi_id || '',
+  })
+  const [saving, setSaving] = useState(false)
+
+  const set = (key) => (event) => setForm({ ...form, [key]: event.target.value })
+
+  const submit = async () => {
+    if (!/^[0-9]{6,24}$/.test(form.account_number)) {
+      toast.error('Enter the account number, digits only.')
+      return
+    }
+    if (!/^[A-Za-z]{4}0[A-Za-z0-9]{6}$/.test(form.ifsc)) {
+      toast.error('That IFSC code does not look right.')
+      return
+    }
+    setSaving(true)
+    try {
+      await fleetService.saveBankDetails({
+        account_name: form.account_name.trim(),
+        account_number: form.account_number.trim(),
+        ifsc: form.ifsc.trim().toUpperCase(),
+        bank_name: form.bank_name.trim() || undefined,
+        upi_id: form.upi_id.trim() || undefined,
+      })
+      onSaved()
+    } catch (err) {
+      toast.error(err?.message || 'Could not save those details.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title="Payout account"
+      description="Only the last four digits are shown back to you once saved."
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose} disabled={saving}>
+            Cancel
+          </Button>
+          <Button variant="brand" loading={saving} onClick={submit}>
+            Save account
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-4">
+        <Field label="Account holder name" htmlFor="acname">
+          <Input id="acname" value={form.account_name} onChange={set('account_name')} />
+        </Field>
+        <Field label="Account number" htmlFor="acnum" hint="Digits only.">
+          <Input
+            id="acnum"
+            inputMode="numeric"
+            value={form.account_number}
+            onChange={set('account_number')}
+            placeholder={current ? 'Enter again to change' : ''}
+          />
+        </Field>
+        <Field label="IFSC code" htmlFor="ifsc" hint="For example HDFC0001234.">
+          <Input id="ifsc" value={form.ifsc} onChange={set('ifsc')} />
+        </Field>
+        <Field label="Bank name (optional)" htmlFor="bankname">
+          <Input id="bankname" value={form.bank_name} onChange={set('bank_name')} />
+        </Field>
+        <Field label="UPI ID (optional)" htmlFor="upi">
+          <Input id="upi" value={form.upi_id} onChange={set('upi_id')} />
+        </Field>
+      </div>
+    </Modal>
   )
 }

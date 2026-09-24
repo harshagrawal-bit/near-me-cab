@@ -187,6 +187,7 @@ async def create_booking(customer: dict[str, Any], payload: BookingCreate) -> di
             else PaymentStatus.PENDING.value
         ),
         "payment_method": payload.payment_method.value,
+        "payment_option": payload.payment_option,
         "amount_paid": 0.0,
         "cancelled_reason": None,
         "cancelled_by": None,
@@ -335,6 +336,47 @@ async def _notify_status(booking: dict[str, Any], target: BookingStatus) -> None
 # ---------------------------------------------------------------------------
 
 
+def upfront_for_option(
+    total_fare: float, option: str, *, advance_settings: Any, option_settings: Any
+) -> dict[str, Any]:
+    """How much a customer pays now, given the option they chose.
+
+    Three shapes, matching what customers expect from this market:
+
+    * `pay_later` — nothing now, settle the whole fare with the driver.
+    * `part`      — a percentage now to hold the car, the rest at the drop.
+    * `full`      — the entire fare now.
+
+    The option is a *name*, never an amount: the figure is always derived here
+    from the stored fare, so a client cannot choose what it owes. An option the
+    operator has switched off falls back to the standard advance rather than
+    being honoured silently.
+    """
+    total = round(float(total_fare), 2)
+    allowed = {
+        "pay_later": option_settings.allow_pay_later,
+        "part": option_settings.allow_part_payment,
+        "full": option_settings.allow_full_payment,
+    }
+    if option not in allowed or not allowed[option]:
+        option = "part" if option_settings.allow_part_payment else "pay_later"
+
+    if option == "pay_later":
+        return {"option": option, "percent": 0.0, "amount": 0.0, "balance_due": total}
+    if option == "full":
+        return {"option": option, "percent": 100.0, "amount": total, "balance_due": 0.0}
+
+    # A part payment is the advance — same percentage, same floor, same
+    # ceiling — so it goes through the one function that already knows the rule.
+    advance = compute_advance(total, advance_settings)
+    return {
+        "option": "part",
+        "percent": advance["percent"],
+        "amount": advance["amount"],
+        "balance_due": advance["balance_due"],
+    }
+
+
 def compute_advance(total_fare: float, advance_settings: Any) -> dict[str, Any]:
     """What the customer must pay up front to hold this booking.
 
@@ -379,7 +421,21 @@ async def confirm_availability(
 
     booking = await _raw_booking(booking_oid)
     settings = await settings_service.get_settings()
-    advance = compute_advance(float(booking.get("total_fare") or 0), settings.advance)
+    total = float(booking.get("total_fare") or 0)
+
+    # Honour what the customer picked at booking time. A booking made before
+    # this existed has no option stored, so it falls back to the advance rule
+    # rather than being treated as pay-later and confirmed for free.
+    chosen = booking.get("payment_option")
+    if chosen:
+        advance = upfront_for_option(
+            total,
+            chosen,
+            advance_settings=settings.advance,
+            option_settings=settings.payment_options,
+        )
+    else:
+        advance = compute_advance(total, settings.advance)
 
     if advance["amount"] <= 0:
         await _apply_status(
@@ -408,6 +464,7 @@ async def confirm_availability(
             "advance_amount": advance["amount"],
             "advance_percent": advance["percent"],
             "balance_due": advance["balance_due"],
+            "payment_option": advance.get("option", chosen),
         },
     )
     return await require_booking(booking_oid)
@@ -488,14 +545,77 @@ async def driver_change_status(
     booking = await _raw_booking(booking_oid)
     if booking.get("driver_id") != driver["_id"]:
         raise PermissionError_("This trip is not assigned to you.")
+    # Remembered so a later cancellation can tell a drop seconds after
+    # accepting from one an hour before pickup.
+    extra = {"accepted_at": utcnow()} if target == BookingStatus.ACCEPTED else None
     await _apply_status(
         booking,
         target,
         actor_id=driver["user_id"],
         actor_role=Role.DRIVER.value,
         note=note,
+        extra=extra,
     )
     return await require_booking(booking_oid)
+
+
+async def driver_cancel(
+    booking_oid: ObjectId, driver: dict[str, Any], reason: str
+) -> dict[str, Any]:
+    """A driver drops a trip they had accepted, and pays for it.
+
+    The penalty is charged before the booking moves, so a driver cannot dodge
+    it by cancelling twice in quick succession — the second call finds a
+    booking already cancelled and stops.
+    """
+    from app.services import wallet_service
+
+    booking = await _raw_booking(booking_oid)
+    if booking.get("driver_id") != driver["_id"]:
+        raise PermissionError_("This trip is not assigned to you.")
+    if booking["status"] in TERMINAL_BOOKING_STATUSES:
+        raise ConflictError("This trip is already closed.")
+    if booking["status"] in {BookingStatus.PICKED_UP.value, BookingStatus.TRIP_STARTED.value}:
+        raise ConflictError("The trip has already started. Call support instead.")
+
+    config = (await settings_service.get_settings()).cancellation
+    penalty = wallet_service.penalty_for_cancellation(
+        accepted_at=ensure_aware(booking["accepted_at"]) if booking.get("accepted_at") else None,
+        scheduled_at=ensure_aware(booking["scheduled_at"]),
+        settings=config,
+        now=utcnow(),
+    )
+    charged = await wallet_service.charge_penalty(
+        driver["_id"],
+        penalty["amount"],
+        reason=penalty["reason"],
+        booking_id=booking_oid,
+        actor_id=str(driver["user_id"]),
+    )
+
+    # Back to CONFIRMED, not CANCELLED: the customer still wants the trip, so
+    # it returns to the pool for another driver rather than being killed off.
+    await _apply_status(
+        booking,
+        BookingStatus.CONFIRMED,
+        actor_id=driver["user_id"],
+        actor_role=Role.DRIVER.value,
+        note=f"Driver cancelled: {reason}. Penalty ₹{penalty['amount']:,.0f}.",
+        extra={"driver_id": None, "vehicle_id": None, "accepted_at": None},
+    )
+    await wallet_service.release(driver["_id"], booking_oid)
+
+    await notification_service.notify(
+        user_id=driver["user_id"],
+        notification_type=NotificationType.TRIP_UPDATE,
+        title=f"Cancellation charge ₹{penalty['amount']:,.0f}",
+        body=penalty["reason"],
+        booking_id=booking_oid,
+    )
+    return {
+        "booking": await require_booking(booking_oid),
+        "penalty": charged,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -649,16 +769,26 @@ async def cancel_booking(
                 "This trip has already started. Please call support to cancel it."
             )
 
-    config = (await settings_service.get_settings()).pricing
+    settings = await settings_service.get_settings()
+    rules = settings.cancellation
     scheduled = ensure_aware(booking["scheduled_at"])
     hours_out = (scheduled - utcnow()).total_seconds() / 3600
+
+    # The fee comes out of the advance the customer actually paid, not out of
+    # the total fare. Charging a share of a fare nobody has paid yet would
+    # produce a "fee" larger than the money we are holding, and a refund that
+    # cannot cover it.
     fee = 0.0
+    advance_paid = float(booking.get("advance_amount") or 0) if booking.get(
+        "advance_status"
+    ) == AdvanceStatus.PAID.value else 0.0
     if (
         actor_role == Role.CUSTOMER.value
-        and hours_out < config.free_cancellation_hours
-        and config.cancellation_fee_percent > 0
+        and hours_out < rules.customer_free_hours
+        and rules.customer_fee_percent > 0
+        and advance_paid > 0
     ):
-        fee = round(float(booking["total_fare"]) * config.cancellation_fee_percent / 100.0)
+        fee = round(advance_paid * rules.customer_fee_percent / 100.0, 2)
 
     await _apply_status(
         booking,
@@ -853,7 +983,57 @@ async def _raw_booking(booking_oid: ObjectId) -> dict[str, Any]:
     return booking
 
 
-async def hydrate(booking: dict[str, Any], *, include_history: bool = False) -> dict[str, Any]:
+def _visible_customer(
+    customer: dict[str, Any] | None,
+    booking: dict[str, Any],
+    viewer_role: str | None,
+    *,
+    hours_before: int = 2,
+) -> dict[str, Any] | None:
+    """Hide a customer's number from the driver until pickup is close.
+
+    A driver needs the number to find someone at the kerb, not from the moment
+    a trip is assigned days earlier. Masking until shortly before pickup keeps
+    the roster usable without handing out a customer list.
+
+    Admins and the customer themselves always see it in full — the mask is a
+    privacy control against the driver's screen, not a security boundary.
+    """
+    if not customer:
+        return None
+    item = serialize(customer)
+    if viewer_role != Role.DRIVER.value:
+        return item
+
+    scheduled = booking.get("scheduled_at")
+    reveal = False
+    if scheduled is not None:
+        hours_out = (ensure_aware(scheduled) - utcnow()).total_seconds() / 3600
+        reveal = hours_out <= hours_before
+    # Once the trip is under way the driver plainly needs to reach them.
+    if booking.get("status") in {
+        BookingStatus.DRIVER_ARRIVING.value,
+        BookingStatus.PICKED_UP.value,
+        BookingStatus.TRIP_STARTED.value,
+    }:
+        reveal = True
+
+    if reveal:
+        item["phone_visible"] = True
+        return item
+
+    phone = str(item.get("phone") or "")
+    item["phone"] = f"{phone[:6]}XXXX" if len(phone) > 6 else "XXXXXX"
+    item["phone_visible"] = False
+    item["phone_available_at"] = (
+        f"Customer phone number will be available {hours_before} hours before the pickup time."
+    )
+    item.pop("email", None)
+    item.pop("saved_locations", None)
+    return item
+
+
+async def hydrate(booking: dict[str, Any], *, include_history: bool = False, viewer_role: str | None = None) -> dict[str, Any]:
     item = serialize(booking)
     item["status_label"] = BOOKING_STATUS_LABELS.get(booking["status"], booking["status"])
     item["vehicle_class"] = vehicle_service.vehicle_class(booking["vehicle_type"])
@@ -865,7 +1045,12 @@ async def hydrate(booking: dict[str, Any], *, include_history: bool = False) -> 
     customer = await mongodb.users().find_one(
         {"_id": booking["customer_id"]}, {"password_hash": 0}
     )
-    item["customer"] = serialize(customer) if customer else None
+    item["customer"] = _visible_customer(
+        customer,
+        booking,
+        viewer_role,
+        hours_before=(await settings_service.get_settings()).cancellation.customer_free_hours,
+    )
 
     if booking.get("driver_id"):
         driver = await mongodb.drivers().find_one({"_id": booking["driver_id"]})
@@ -895,9 +1080,11 @@ async def hydrate(booking: dict[str, Any], *, include_history: bool = False) -> 
     return item
 
 
-async def require_booking(booking_oid: ObjectId, *, include_history: bool = True) -> dict[str, Any]:
+async def require_booking(
+    booking_oid: ObjectId, *, include_history: bool = True, viewer_role: str | None = None
+) -> dict[str, Any]:
     booking = await _raw_booking(booking_oid)
-    return await hydrate(booking, include_history=include_history)
+    return await hydrate(booking, include_history=include_history, viewer_role=viewer_role)
 
 
 async def get_for_actor(
@@ -910,7 +1097,7 @@ async def get_for_actor(
     if role == Role.DRIVER.value:
         if not driver or booking.get("driver_id") != driver["_id"]:
             raise NotFoundError("Booking not found.")
-    return await hydrate(booking, include_history=True)
+    return await hydrate(booking, include_history=True, viewer_role=role)
 
 
 def _build_query(filters: dict[str, Any]) -> dict[str, Any]:
@@ -959,6 +1146,7 @@ async def list_bookings(
     extra_query: dict[str, Any] | None = None,
     sort_field: str = "created_at",
     sort_direction: int = -1,
+    viewer_role: str | None = None,
 ) -> dict[str, Any]:
     query = _build_query(filters or {})
     if extra_query:
@@ -971,7 +1159,7 @@ async def list_bookings(
         .skip((page - 1) * page_size)
         .limit(page_size)
     )
-    items = [await hydrate(doc) async for doc in cursor]
+    items = [await hydrate(doc, viewer_role=viewer_role) async for doc in cursor]
     return build_page(items, total, page, page_size)
 
 

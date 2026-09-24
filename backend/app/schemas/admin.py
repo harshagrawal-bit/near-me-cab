@@ -92,12 +92,70 @@ class WalletSettings(ApiModel):
         return self
 
 
+class CancellationSettings(ApiModel):
+    """What a cancellation costs, on both sides.
+
+    Customer and driver are deliberately separate rules. A customer who changes
+    their mind loses part of an advance they already paid; a driver who drops a
+    trip they accepted costs the business a booking, so the charge comes out of
+    the security deposit instead.
+    """
+
+    #: Share of a paid advance kept when a customer cancels inside the free
+    #: window. The rest is refunded.
+    customer_fee_percent: float = Field(default=50, ge=0, le=100)
+    #: Hours before pickup inside which the fee applies. Cancel earlier and the
+    #: whole advance comes back.
+    customer_free_hours: int = Field(default=2, ge=0, le=168)
+
+    #: Driver penalties, charged to the wallet. Flat within the grace window
+    #: after accepting, then rising as pickup approaches — a late drop is the
+    #: one that actually strands a customer.
+    driver_grace_minutes: int = Field(default=15, ge=0, le=240)
+    driver_grace_penalty: float = Field(default=150, ge=0, le=10_000)
+    driver_late_penalty: float = Field(default=300, ge=0, le=10_000)
+    #: Hours before pickup that counts as "late".
+    driver_late_hours: int = Field(default=1, ge=0, le=48)
+    #: Charged when a driver drops a trip inside the late window.
+    driver_critical_penalty: float = Field(default=500, ge=0, le=20_000)
+
+
+class PaymentOptionSettings(ApiModel):
+    """Which of the three ways to pay a customer may choose at booking.
+
+    Mirrors what the market offers: settle with the driver, secure the seat
+    with a part payment, or pay the whole fare now.
+    """
+
+    allow_pay_later: bool = True
+    allow_part_payment: bool = True
+    allow_full_payment: bool = True
+    #: Which option is pre-selected and badged as recommended.
+    recommended: str = Field(default="part", max_length=12)
+
+    # Note there is deliberately no separate "part payment percent" here. A
+    # part payment IS the advance, so it reads `advance.percent` and its floor
+    # and ceiling. Two knobs that both mean "how much up front" would drift
+    # apart and nobody would know which one applied.
+
+
+class PrivacySettings(ApiModel):
+    """Contact points and dates shown on the policy pages."""
+
+    policy_updated: str = Field(default="24 September 2026", max_length=40)
+    grievance_officer: str = Field(default="Operations Manager", max_length=120)
+    grievance_email: str = Field(default="privacy@nearmecab.in", max_length=120)
+
+
 class SettingsPayload(ApiModel):
     company: CompanySettings = Field(default_factory=CompanySettings)
     pricing: PricingSettings = Field(default_factory=PricingSettings)
     booking: BookingSettings = Field(default_factory=BookingSettings)
     advance: AdvanceSettings = Field(default_factory=AdvanceSettings)
     wallet: WalletSettings = Field(default_factory=WalletSettings)
+    cancellation: CancellationSettings = Field(default_factory=CancellationSettings)
+    payment_options: PaymentOptionSettings = Field(default_factory=PaymentOptionSettings)
+    privacy: PrivacySettings = Field(default_factory=PrivacySettings)
 
 
 class SettingsUpdate(ApiModel):
@@ -106,6 +164,9 @@ class SettingsUpdate(ApiModel):
     booking: BookingSettings | None = None
     advance: AdvanceSettings | None = None
     wallet: WalletSettings | None = None
+    cancellation: CancellationSettings | None = None
+    payment_options: PaymentOptionSettings | None = None
+    privacy: PrivacySettings | None = None
 
 
 class SupportRequest(ApiModel):
