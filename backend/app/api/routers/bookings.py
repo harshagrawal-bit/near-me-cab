@@ -243,3 +243,26 @@ async def driver_cancel(
     return await booking_service.driver_cancel(
         object_id(booking_id, "booking_id"), driver, payload.reason
     )
+
+
+@router.post(
+    "/{booking_id}/refund",
+    dependencies=[Depends(write_rate_limit)],
+    summary="Refund a customer, in full or in part (admin)",
+)
+async def refund_booking(
+    booking_id: str,
+    admin: AdminUser,
+    amount: float | None = Query(None, gt=0, le=1_000_000),
+    reason: str = Query(..., min_length=3, max_length=300),
+) -> dict:
+    """Bounded by what was actually paid online — we cannot send back more
+    than we received."""
+    from app.services import payment_service
+
+    return await payment_service.refund_payment(
+        object_id(booking_id, "booking_id"),
+        amount=amount,
+        reason=reason,
+        actor_id=admin["_id"],
+    )

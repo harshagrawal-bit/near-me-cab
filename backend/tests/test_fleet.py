@@ -214,7 +214,9 @@ async def test_employed_driver_cannot_manage_a_fleet(client, seeded):
 # ---------------------------------------------------------------------------
 
 
-async def test_advance_is_computed_server_side(client, customer_token, admin_token, seeded):
+async def test_advance_is_computed_server_side(
+    client, customer_token, admin_token, seeded, manual_confirmation
+):
     created = await client.post(
         "/api/bookings",
         headers=auth(customer_token),

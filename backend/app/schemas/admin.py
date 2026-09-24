@@ -37,7 +37,10 @@ class PricingSettings(ApiModel):
 class BookingSettings(ApiModel):
     min_advance_minutes: int = Field(default=30, ge=0, le=10_080)
     max_advance_days: int = Field(default=90, ge=1, le=365)
-    auto_confirm: bool = False
+    #: On by default: a customer pays and their booking confirms itself, and
+    #: drivers pick it up from the open pool. Switch it off only if you want
+    #: the office to check a car is free before anyone is asked to pay.
+    auto_confirm: bool = True
 
 
 class AdvanceSettings(ApiModel):

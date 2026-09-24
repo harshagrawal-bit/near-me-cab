@@ -260,3 +260,24 @@ async def settle_queued_refund(
     return await payment_service.settle_refund_manually(
         object_id(payment_id, "payment_id"), actor_id=admin["_id"], note=note
     )
+
+
+@router.get("/razorpay/pending", summary="Orders opened but never confirmed (admin)")
+async def pending_orders(admin: AdminUser) -> dict:
+    items = await payment_service.pending_intents()
+    return {"items": items, "total": len(items)}
+
+
+@router.post(
+    "/razorpay/reconcile",
+    dependencies=[Depends(write_rate_limit)],
+    summary="Ask Razorpay about unconfirmed orders and settle them (admin)",
+)
+async def reconcile(
+    admin: AdminUser, older_than_minutes: int = Query(2, ge=0, le=1440)
+) -> dict:
+    """Recovers payments where the money moved but the webhook never arrived.
+
+    Idempotent, so running it twice settles nothing twice.
+    """
+    return await payment_service.reconcile_pending(older_than_minutes=older_than_minutes)

@@ -1045,12 +1045,24 @@ async def hydrate(booking: dict[str, Any], *, include_history: bool = False, vie
     customer = await mongodb.users().find_one(
         {"_id": booking["customer_id"]}, {"password_hash": 0}
     )
+    reveal_hours = (await settings_service.get_settings()).cancellation.customer_free_hours
     item["customer"] = _visible_customer(
-        customer,
-        booking,
-        viewer_role,
-        hours_before=(await settings_service.get_settings()).cancellation.customer_free_hours,
+        customer, booking, viewer_role, hours_before=reveal_hours
     )
+
+    # `passenger_phone` is the number the driver actually rings, and it is a
+    # field on the booking rather than on the customer record — masking the
+    # customer object alone would leave the real number on the driver's screen.
+    if viewer_role == Role.DRIVER.value:
+        shown = (item.get("customer") or {}).get("phone_visible", True)
+        item["passenger_phone_visible"] = bool(shown)
+        if not shown:
+            raw = str(item.get("passenger_phone") or "")
+            item["passenger_phone"] = f"{raw[:6]}XXXX" if len(raw) > 6 else "XXXXXX"
+            item["passenger_phone_available_at"] = (
+                f"Customer phone number will be available {reveal_hours} hours "
+                "before the pickup time."
+            )
 
     if booking.get("driver_id"):
         driver = await mongodb.drivers().find_one({"_id": booking["driver_id"]})

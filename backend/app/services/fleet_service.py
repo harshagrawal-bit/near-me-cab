@@ -331,7 +331,9 @@ async def open_bookings(owner: dict[str, Any], limit: int = 50) -> list[dict[str
     settings = await settings_service.get_settings()
     out = []
     for doc in raw:
-        hydrated = await booking_service.hydrate(doc)
+        # Masked: these are trips nobody has accepted yet, so the browsing
+        # driver has even less claim to the number than an assigned one.
+        hydrated = await booking_service.hydrate(doc, viewer_role=Role.DRIVER.value)
         hydrated["wallet_required"] = wallet_service.required_for_booking(doc, settings.wallet)
         out.append(hydrated)
     return out

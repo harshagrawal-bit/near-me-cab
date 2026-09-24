@@ -10,9 +10,17 @@ import { Alert, ErrorState } from '@/components/ui/States'
 import { SkeletonCard } from '@/components/ui/Loaders'
 import { IconChevronLeft, IconPhone, IconPin } from '@/components/ui/Icons'
 import TripActions from '@/components/driver/TripActions'
+import { ConfirmDialog } from '@/components/ui/Modal'
+import { Textarea } from '@/components/ui/Field'
+import { useToast } from '@/components/ui/Toast'
+import { useState } from 'react'
 
 export default function DriverTripDetail() {
   const { bookingId } = useParams()
+  const toast = useToast()
+  const [cancelOpen, setCancelOpen] = useState(false)
+  const [cancelReason, setCancelReason] = useState('')
+  const [cancelling, setCancelling] = useState(false)
   const { data: booking, loading, error, refetch } = useApi(
     () => bookingService.detail(bookingId),
     [bookingId],
@@ -65,12 +73,23 @@ export default function DriverTripDetail() {
                 {booking.passenger_count === 1 ? 'passenger' : 'passengers'}
               </p>
             </div>
-            <a href={`tel:${booking.passenger_phone}`}>
-              <Button variant="secondary" size="sm">
-                <IconPhone className="h-4 w-4" />
-                {formatPhone(booking.passenger_phone)}
-              </Button>
-            </a>
+            {booking.passenger_phone_visible === false ? (
+              <div className="text-right">
+                <p className="font-mono text-sm font-semibold text-ink-500">
+                  {booking.passenger_phone}
+                </p>
+                <p className="mt-0.5 max-w-[15rem] text-xs text-ink-400">
+                  Available 2 hours before pickup
+                </p>
+              </div>
+            ) : (
+              <a href={`tel:${booking.passenger_phone}`}>
+                <Button variant="brand" size="sm">
+                  <IconPhone className="h-4 w-4" />
+                  {formatPhone(booking.passenger_phone)}
+                </Button>
+              </a>
+            )}
           </div>
         </CardBody>
       </Card>
@@ -146,6 +165,67 @@ export default function DriverTripDetail() {
           </p>
         </CardBody>
       </Card>
+      {/* Dropping a trip costs money, so the charge is named before it is
+          confirmed rather than appearing in the statement afterwards. */}
+      {['driver_assigned', 'accepted', 'driver_arriving'].includes(booking.status) && (
+        <>
+          <Button
+            variant="danger-outline"
+            fullWidth
+            onClick={() => setCancelOpen(true)}
+            className="mt-2"
+          >
+            Cancel this trip
+          </Button>
+
+          <ConfirmDialog
+            open={cancelOpen}
+            onClose={() => setCancelOpen(false)}
+            title="Cancel this trip?"
+            tone="danger"
+            confirmLabel="Cancel trip"
+            loading={cancelling}
+            onConfirm={async () => {
+              if (cancelReason.trim().length < 3) {
+                toast.error('Tell us why — the office sees this.')
+                return
+              }
+              setCancelling(true)
+              try {
+                const result = await bookingService.driverCancel(bookingId, {
+                  reason: cancelReason.trim(),
+                })
+                const charged = result?.penalty?.amount
+                toast.error(
+                  charged
+                    ? `Trip cancelled. ${formatCurrency(charged)} charged to your wallet.`
+                    : 'Trip cancelled.',
+                )
+                setCancelOpen(false)
+                setCancelReason('')
+                refetch()
+              } catch (err) {
+                toast.error(err?.message || 'Could not cancel the trip.')
+              } finally {
+                setCancelling(false)
+              }
+            }}
+          >
+            <p className="text-sm text-ink-600">
+              A cancellation charge is deducted from your wallet. It is higher the closer
+              to pickup you cancel, because that is when we can least easily find another
+              car.
+            </p>
+            <Textarea
+              className="mt-3"
+              rows={3}
+              placeholder="Why are you cancelling?"
+              value={cancelReason}
+              onChange={(event) => setCancelReason(event.target.value)}
+            />
+          </ConfirmDialog>
+        </>
+      )}
     </div>
   )
 }

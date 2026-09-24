@@ -18,6 +18,7 @@ and never comes from a webhook body.
 
 from __future__ import annotations
 
+import datetime as dt
 import logging
 from typing import Any
 
@@ -491,3 +492,171 @@ async def stuck_intents() -> list[dict[str, Any]]:
     """Payments taken whose side effect half-failed. Same shape of problem."""
     cursor = mongodb.payment_intents().find({"status": "needs_attention"})
     return [serialize(doc) async for doc in cursor]
+
+
+# ---------------------------------------------------------------------------
+# Reconciliation
+# ---------------------------------------------------------------------------
+
+
+async def reconcile_pending(*, older_than_minutes: int = 2, limit: int = 100) -> dict[str, Any]:
+    """Settle orders Razorpay captured but we never heard about.
+
+    The webhook is the normal path and the checkout callback is the fast one,
+    but both can fail in ways that leave a customer charged and a booking
+    unconfirmed: a webhook secret that does not match, a live webhook that was
+    never created when the keys were switched, or a sleeping instance that
+    missed every retry.
+
+    Asking Razorpay directly is the one question that always has an answer, so
+    this closes the gap rather than relying on delivery. Safe to run as often
+    as you like — it goes through the same idempotent claim as everything else,
+    so an order already applied is a no-op.
+
+    `older_than_minutes` skips orders a customer may still be paying, which
+    would otherwise be reported as unpaid a second after the sheet opened.
+    """
+    cutoff = utcnow() - dt.timedelta(minutes=older_than_minutes)
+    cursor = (
+        mongodb.payment_intents()
+        .find({"status": "created", "created_at": {"$lt": cutoff}})
+        .sort("created_at", -1)
+        .limit(limit)
+    )
+    pending = [doc async for doc in cursor]
+
+    settled, still_unpaid, failed = [], [], []
+    for intent in pending:
+        order_id = intent["order_id"]
+        try:
+            payments = await razorpay_service.fetch_order_payments(order_id)
+        except Exception:
+            logger.exception("Could not reconcile order %s", order_id)
+            failed.append(order_id)
+            continue
+
+        captured = next(
+            (p for p in payments if p.get("status") in {"captured", "authorized"}), None
+        )
+        if not captured:
+            still_unpaid.append(order_id)
+            continue
+
+        try:
+            result = await apply_payment(
+                order_id=order_id, payment_id=captured["id"], source="reconcile"
+            )
+            if result.get("applied"):
+                settled.append(
+                    {
+                        "order_id": order_id,
+                        "payment_id": captured["id"],
+                        "purpose": intent["purpose"],
+                        "amount": intent["amount"],
+                    }
+                )
+        except Exception:
+            logger.exception("Failed to apply reconciled order %s", order_id)
+            failed.append(order_id)
+
+    logger.info(
+        "Reconcile: %d checked, %d settled, %d still unpaid, %d failed",
+        len(pending),
+        len(settled),
+        len(still_unpaid),
+        len(failed),
+    )
+    return {
+        "checked": len(pending),
+        "settled": settled,
+        "still_unpaid": still_unpaid,
+        "failed": failed,
+    }
+
+
+async def pending_intents(limit: int = 100) -> list[dict[str, Any]]:
+    """Orders opened but never confirmed — the queue reconcile works through."""
+    cursor = (
+        mongodb.payment_intents()
+        .find({"status": {"$in": ["created", "processing", "needs_attention"]}})
+        .sort("created_at", -1)
+        .limit(limit)
+    )
+    return [serialize(doc) async for doc in cursor]
+
+
+async def refund_payment(
+    booking_oid: ObjectId,
+    *,
+    amount: float | None = None,
+    reason: str,
+    actor_id: ObjectId | str,
+) -> dict[str, Any]:
+    """Admin-initiated refund against a booking, in full or in part.
+
+    Separate from the automatic cancellation refund because the reasons differ:
+    a driver never turned up, a fare was overcharged, a goodwill gesture. The
+    amount is the admin's call, bounded by what the customer actually paid
+    through the gateway — we cannot send back more than we received, and a
+    refund larger than the payment is a Razorpay error rather than a bug worth
+    discovering in production.
+    """
+    booking = await mongodb.bookings().find_one({"_id": booking_oid})
+    if not booking:
+        raise NotFoundError("Booking not found.")
+
+    gateway_rows = [
+        doc
+        async for doc in mongodb.payments().find(
+            {
+                "booking_id": booking_oid,
+                "provider": "razorpay",
+                "provider_reference": {"$type": "string"},
+                "kind": {"$ne": "refund"},
+            }
+        )
+    ]
+    if not gateway_rows:
+        raise ConflictError(
+            "Nothing was paid online for this booking, so there is nothing to refund "
+            "through the gateway. Return it by hand and record it as a payment."
+        )
+
+    already = 0.0
+    async for doc in mongodb.payments().find({"booking_id": booking_oid, "kind": "refund"}):
+        already += abs(float(doc.get("amount") or 0))
+
+    paid_online = sum(float(row.get("amount") or 0) for row in gateway_rows)
+    refundable = round(paid_online - already, 2)
+    if refundable <= 0:
+        raise ConflictError("This booking has already been fully refunded.")
+
+    wanted = round(float(amount), 2) if amount else refundable
+    if wanted > refundable:
+        raise ValidationError(
+            f"Only ₹{refundable:,.0f} can be refunded — that is what was paid online."
+        )
+
+    # Refund against the largest matching payment so a part refund does not
+    # need splitting across several gateway payments.
+    source = max(gateway_rows, key=lambda r: float(r.get("amount") or 0))
+    refund = await razorpay_service.create_refund(
+        payment_id=source["provider_reference"],
+        amount_rupees=wanted,
+        notes={"booking": booking.get("booking_id", ""), "reason": reason[:200]},
+    )
+    await _record_refund(
+        booking,
+        source,
+        amount=wanted,
+        provider="razorpay",
+        reference=refund.get("id"),
+        status="processed",
+        reason=reason,
+    )
+    return {
+        "refunded": True,
+        "amount": wanted,
+        "reference": refund.get("id"),
+        "remaining_refundable": round(refundable - wanted, 2),
+    }

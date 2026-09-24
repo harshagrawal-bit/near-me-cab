@@ -42,7 +42,7 @@ async def test_quote_comes_from_the_price_book(client, customer_token, seeded):
     assert options["suv"] == 4000
 
 
-async def test_booking_uses_server_price(client, customer_token, seeded):
+async def test_booking_uses_server_price(client, customer_token, seeded, manual_confirmation):
     response = await client.post(
         "/api/bookings",
         json=booking_payload(str(seeded["route"]["_id"])),
@@ -156,7 +156,9 @@ async def test_customer_cannot_drive_the_status_machine(client, customer_token, 
     assert response.status_code == 403
 
 
-async def test_every_transition_is_recorded_in_history(client, customer_token, admin_token, seeded):
+async def test_every_transition_is_recorded_in_history(
+    client, customer_token, admin_token, seeded, manual_confirmation
+):
     created = await client.post(
         "/api/bookings",
         json=booking_payload(str(seeded["route"]["_id"])),

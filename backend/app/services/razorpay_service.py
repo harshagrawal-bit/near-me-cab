@@ -149,6 +149,28 @@ async def fetch_payment(payment_id: str) -> dict[str, Any] | None:
     return response.json()
 
 
+async def fetch_order_payments(order_id: str) -> list[dict[str, Any]]:
+    """Ask Razorpay what actually happened to an order.
+
+    The webhook is how we normally find out, but a webhook can be misconfigured,
+    rejected on a secret mismatch, or dropped while the service is asleep — and
+    when that happens the money has still moved. This is the question we can
+    always ask directly, and it is what makes stuck payments recoverable
+    instead of permanently lost.
+    """
+    if not is_configured():
+        return []
+    async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as client:
+        response = await client.get(
+            f"{API_BASE}/orders/{order_id}/payments",
+            auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET),
+        )
+    if response.status_code >= 400:
+        logger.warning("Could not read payments for order %s (%s)", order_id, response.status_code)
+        return []
+    return response.json().get("items", []) or []
+
+
 def _sign(message: bytes, secret: str) -> str:
     return hmac.new(secret.encode("utf-8"), message, hashlib.sha256).hexdigest()
 

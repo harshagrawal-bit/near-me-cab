@@ -177,24 +177,59 @@ export default function SearchResults() {
             return (
               <Card
                 key={option.vehicle_type}
-                className={cn('p-4 transition-colors', !soldOut && 'hover:border-ink-300')}
+                className={cn(
+                  'relative overflow-hidden p-4 transition-colors sm:p-5',
+                  !soldOut && 'hover:border-ink-300',
+                )}
               >
-                <div className="flex flex-wrap items-start justify-between gap-4">
-                  <div className="flex min-w-0 items-start gap-3">
-                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-ink-100 text-ink-600">
-                      <IconCar className="h-5 w-5" />
+                {/* Accent rail: gives the card a clear left edge and lets a
+                    sold-out class read as different at a glance. */}
+                <span
+                  aria-hidden="true"
+                  className={cn(
+                    'absolute inset-y-0 left-0 w-1',
+                    soldOut ? 'bg-ink-200' : 'bg-brand-500',
+                  )}
+                />
+
+                <div className="flex flex-wrap items-start justify-between gap-4 pl-2">
+                  <div className="flex min-w-0 items-start gap-3.5">
+                    <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-brand-50 text-brand-700 ring-1 ring-brand-100">
+                      <IconCar className="h-7 w-7" />
                     </span>
+
                     <div className="min-w-0">
-                      <p className="text-[15px] font-semibold text-ink-900">{option.label}</p>
-                      <p className="mt-0.5 flex items-center gap-1 text-sm text-ink-500">
-                        <IconUsers className="h-3.5 w-3.5" />
-                        {option.seating_capacity} passengers
-                      </p>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="text-base font-bold text-ink-900">{option.label}</p>
+                        <span className="rounded-md bg-ink-100 px-1.5 py-0.5 text-[0.6875rem] font-semibold uppercase text-ink-600">
+                          {option.vehicle_type}
+                        </span>
+                        <span className="text-xs text-ink-400">or equivalent</span>
+                      </div>
+
+                      {/* What the fare does and does not cover, stated here
+                          rather than discovered at the drop. */}
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        <Chip tone="neutral">
+                          <IconUsers className="h-3 w-3" />
+                          {option.seating_capacity} seats
+                        </Chip>
+                        <Chip tone="neutral">AC</Chip>
+                        {Number(option.breakdown?.toll) > 0 ? (
+                          <Chip tone="success">Toll included</Chip>
+                        ) : (
+                          <Chip tone="warn">Toll + parking extra</Chip>
+                        )}
+                        {Number(option.breakdown?.driver_allowance) > 0 && (
+                          <Chip tone="success">Driver bata included</Chip>
+                        )}
+                      </div>
+
                       {option.description && (
-                        <p className="mt-1 text-sm text-ink-500">{option.description}</p>
+                        <p className="mt-2 text-sm text-ink-500">{option.description}</p>
                       )}
                       {soldOut && (
-                        <p className="mt-1.5 text-xs font-medium text-warning-700">
+                        <p className="mt-2 text-xs font-medium text-warning-700">
                           No vehicles of this class are free right now — we will confirm
                           availability before charging you.
                         </p>
@@ -205,19 +240,22 @@ export default function SearchResults() {
                   <div className="flex flex-col items-end gap-2">
                     <div className="text-right">
                       {option.breakdown.discount > 0 && (
-                        <p className="text-sm text-ink-400 line-through tabular">
-                          {formatCurrency(
-                            option.breakdown.subtotal + option.breakdown.tax,
-                          )}
-                        </p>
+                        <>
+                          <p className="text-sm text-ink-400 line-through tabular">
+                            {formatCurrency(option.breakdown.subtotal + option.breakdown.tax)}
+                          </p>
+                          <p className="text-xs font-semibold text-success-700">
+                            Save {formatCurrency(option.breakdown.discount)}
+                          </p>
+                        </>
                       )}
-                      <p className="text-xl font-semibold tabular tracking-tight text-ink-900">
+                      <p className="text-2xl font-bold tabular tracking-tight text-ink-900">
                         {formatCurrency(option.fare)}
                       </p>
                       <p className="text-xs text-ink-500">all inclusive</p>
                     </div>
-                    <Button size="sm" onClick={() => choose(option)}>
-                      Select
+                    <Button variant="brand" onClick={() => choose(option)} className="w-full sm:w-auto">
+                      Select &amp; continue →
                     </Button>
                   </div>
                 </div>
@@ -231,5 +269,25 @@ export default function SearchResults() {
         </div>
       )}
     </div>
+  )
+}
+
+
+/** Small labelled pill used on the vehicle cards. */
+function Chip({ tone = 'neutral', children }) {
+  const tones = {
+    neutral: 'bg-ink-50 text-ink-600 ring-ink-100',
+    success: 'bg-success-50 text-success-700 ring-success-100',
+    warn: 'bg-amber-50 text-amber-800 ring-amber-200',
+  }
+  return (
+    <span
+      className={cn(
+        'inline-flex items-center gap-1 rounded-md px-2 py-1 text-[0.6875rem] font-semibold ring-1',
+        tones[tone],
+      )}
+    >
+      {children}
+    </span>
   )
 }

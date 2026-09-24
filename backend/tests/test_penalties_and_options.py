@@ -206,3 +206,95 @@ def test_only_the_last_four_digits_of_an_account_are_returned():
     )
     assert masked["account_number_masked"] == "••••9012"
     assert "account_number" not in masked
+
+
+# ---------------------------------------------------------------------------
+# Instant booking: no office gate
+# ---------------------------------------------------------------------------
+
+
+def _payload(route_id):
+    import datetime as dt
+
+    return {
+        "route_id": route_id,
+        "pickup": {"address": "Pune Station"},
+        "drop": {"address": "Mumbai Airport"},
+        "trip_type": "one_way",
+        "vehicle_type": "sedan",
+        "scheduled_at": (utcnow() + dt.timedelta(days=2)).isoformat(),
+        "passenger_count": 2,
+        "passenger_name": "Test Rider",
+        "passenger_phone": "9876543210",
+    }
+
+
+async def test_a_new_booking_asks_for_payment_without_waiting_for_the_office(
+    client, customer_token, seeded
+):
+    """The whole point of the flow change: no admin step before paying."""
+    from tests.conftest import auth
+
+    payload = _payload(str(seeded["route"]["_id"]))
+    payload["payment_option"] = "part"
+    created = await client.post("/api/bookings", json=payload, headers=auth(customer_token))
+
+    assert created.status_code == 201, created.text
+    body = created.json()
+    assert body["status"] == BookingStatus.AWAITING_PAYMENT.value
+    assert body["advance_amount"] > 0
+
+
+async def test_paying_later_confirms_immediately_and_reaches_the_driver_pool(
+    client, customer_token, seeded
+):
+    """Nothing to pay means nothing to wait for — it should be takeable at once."""
+    from tests.conftest import auth
+
+    payload = _payload(str(seeded["route"]["_id"]))
+    payload["payment_option"] = "pay_later"
+    created = await client.post("/api/bookings", json=payload, headers=auth(customer_token))
+
+    assert created.status_code == 201, created.text
+    body = created.json()
+    assert body["status"] == BookingStatus.CONFIRMED.value
+
+    booking = await mongodb.bookings().find_one({"_id": ObjectId(body["id"])})
+    assert booking["driver_id"] is None  # open for any driver to accept
+
+
+async def test_the_open_pool_never_shows_a_driver_an_unmasked_number(seeded):
+    """Drivers browsing unassigned trips have the least claim to the number."""
+    from app.services import fleet_service
+
+    owner = await mongodb.drivers().find_one({"driver_type": "owner"})
+    if not owner:
+        pytest.skip("no owner driver seeded")
+    for trip in await fleet_service.open_bookings(owner):
+        customer = trip.get("customer") or {}
+        if customer.get("phone"):
+            assert customer.get("phone_visible") is not True or "X" not in customer["phone"]
+            if customer.get("phone_visible") is False:
+                assert "XXXX" in customer["phone"]
+
+
+async def test_the_number_the_driver_actually_rings_is_masked_too(seeded):
+    """passenger_phone lives on the booking, not the customer record — masking
+    only the customer object would leave the real number on screen."""
+    booking_oid = ObjectId()
+    await mongodb.bookings().insert_one({
+        "_id": booking_oid, "booking_id": "NM-MASK-0001",
+        "customer_id": seeded["customer"]["_id"], "status": BookingStatus.DRIVER_ASSIGNED.value,
+        "vehicle_type": "sedan", "total_fare": 1000.0, "amount_paid": 0.0,
+        "passenger_name": "Rider", "passenger_phone": "9876543210", "passenger_count": 1,
+        "scheduled_at": utcnow() + dt.timedelta(days=3),
+        "created_at": utcnow(), "updated_at": utcnow(),
+    })
+    raw = await mongodb.bookings().find_one({"_id": booking_oid})
+
+    as_driver = await booking_service.hydrate(raw, viewer_role=Role.DRIVER.value)
+    assert as_driver["passenger_phone"] == "987654XXXX"
+    assert as_driver["passenger_phone_visible"] is False
+
+    as_admin = await booking_service.hydrate(raw, viewer_role=Role.ADMIN.value)
+    assert as_admin["passenger_phone"] == "9876543210"

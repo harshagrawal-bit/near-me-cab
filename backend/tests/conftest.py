@@ -157,3 +157,25 @@ async def admin_token(client, seeded):
 
 def auth(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
+
+
+@pytest_asyncio.fixture(loop_scope="session")
+async def manual_confirmation(app):
+    """Force the office-confirms-first flow for one test.
+
+    Instant booking is the default now — a customer pays and the booking
+    confirms itself. Tests that exercise the older manual path must say so,
+    rather than silently depending on whichever default happens to be set.
+    """
+    from app.db import mongodb
+    from app.services import settings_service
+
+    key = settings_service.SETTINGS_KEY
+    before = await mongodb.admin_settings().find_one({"key": key})
+    await settings_service.get_settings_doc()
+    await mongodb.admin_settings().update_one(
+        {"key": key}, {"$set": {"booking.auto_confirm": False}}
+    )
+    yield
+    if before is not None:
+        await mongodb.admin_settings().replace_one({"key": key}, before)
