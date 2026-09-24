@@ -584,6 +584,7 @@ async def driver_cancel(
         scheduled_at=ensure_aware(booking["scheduled_at"]),
         settings=config,
         now=utcnow(),
+        total_fare=float(booking.get("total_fare") or 0),
     )
     charged = await wallet_service.charge_penalty(
         driver["_id"],

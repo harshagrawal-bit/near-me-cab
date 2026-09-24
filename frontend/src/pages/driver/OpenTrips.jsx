@@ -44,43 +44,123 @@ export default function OpenTrips() {
       ) : (
         <div className="space-y-3">
           {data.items.map((trip) => (
-            <Card key={trip.id}>
-              <CardBody className="flex flex-wrap items-start justify-between gap-4">
-                <div className="min-w-0 flex-1">
+            <Card key={trip.id} className="relative overflow-hidden">
+              <span
+                aria-hidden="true"
+                className="absolute inset-y-0 left-0 w-1 bg-brand-500"
+              />
+              <CardBody className="space-y-3.5 pl-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="font-mono text-xs text-ink-500">{trip.booking_id}</span>
-                    <Badge tone="info">{titleCase(trip.vehicle_type)}</Badge>
-                    <Badge tone="neutral">{titleCase(trip.trip_type)}</Badge>
-                  </div>
-                  <p className="mt-2 flex items-start gap-1.5 text-sm font-medium text-ink-900">
-                    <IconPin className="mt-0.5 h-4 w-4 shrink-0 text-ink-400" />
-                    <span className="min-w-0">
-                      {trip.pickup?.address} <span className="text-ink-400">→</span>{' '}
-                      {trip.drop?.address}
+                    <span className="text-sm font-bold text-ink-900">
+                      {titleCase(trip.trip_type)}
                     </span>
+                    <Badge tone="info">{titleCase(trip.vehicle_type)}</Badge>
+                  </div>
+                  <span className="rounded-full bg-amber-50 px-2.5 py-1 font-mono text-xs font-semibold text-amber-800">
+                    {trip.booking_id}
+                  </span>
+                </div>
+
+                {/* Route, with the two ends visually distinct rather than run
+                    together on one line. */}
+                <div className="space-y-1.5">
+                  <p className="flex items-start gap-2 text-sm font-semibold text-ink-900">
+                    <span
+                      aria-hidden="true"
+                      className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-brand-600"
+                    />
+                    <span className="min-w-0">{trip.pickup?.address}</span>
                   </p>
-                  <p className="mt-1.5 text-sm text-ink-500">
-                    {formatDateTime(trip.scheduled_at)} · {trip.passenger_count} passengers
+                  <p className="flex items-start gap-2 text-sm text-ink-600">
+                    <span
+                      aria-hidden="true"
+                      className="mt-1.5 h-2 w-2 shrink-0 rounded-full border-2 border-ink-400"
+                    />
+                    <span className="min-w-0">{trip.drop?.address}</span>
                   </p>
                 </div>
 
-                <div className="shrink-0 text-right">
-                  <p className="text-lg font-semibold tabular text-ink-900">
-                    {formatCurrency(trip.total_fare)}
-                  </p>
-                  {/* Show the commitment before they tap, not after it fails. */}
-                  <p className="mt-0.5 text-xs text-ink-500">
-                    Holds {formatCurrency(trip.wallet_required)}
-                  </p>
-                  <Button
-                    size="sm"
-                    className="mt-2.5"
-                    disabled={!wallet?.eligible}
-                    onClick={() => setAccepting(trip)}
-                  >
-                    Accept trip
-                  </Button>
+                {/* The three numbers that decide whether to take the job. */}
+                <div className="grid grid-cols-3 gap-2 rounded-xl bg-brand-50/60 p-3">
+                  <Stat label="You earn" value={formatCurrency(trip.driver_brief?.trip_fare ?? trip.total_fare)} strong />
+                  <Stat
+                    label="Distance"
+                    value={
+                      trip.driver_brief?.distance_km
+                        ? `${trip.driver_brief.distance_km} km`
+                        : '—'
+                    }
+                  />
+                  <Stat label="Passengers" value={trip.passenger_count} />
                 </div>
+
+                <p className="text-sm text-ink-600">
+                  <span className="font-medium text-ink-900">Departure</span>{' '}
+                  {formatDateTime(trip.scheduled_at)}
+                </p>
+
+                {/* What is and is not covered, so there are no surprises on the
+                    road. Mirrors what the customer was told. */}
+                <div className="flex flex-wrap gap-1.5">
+                  <Chip tone={trip.driver_brief?.toll_included ? 'success' : 'warn'}>
+                    {trip.driver_brief?.toll_included ? 'Toll included' : 'Toll extra'}
+                  </Chip>
+                  <Chip tone="warn">Parking extra</Chip>
+                  {trip.driver_brief?.driver_allowance_included && (
+                    <Chip tone="success">Driver bata included</Chip>
+                  )}
+                  {Number(trip.driver_brief?.night_surcharge) > 0 && (
+                    <Chip tone="neutral">Night trip</Chip>
+                  )}
+                </div>
+
+                {Number(trip.driver_brief?.cash_to_collect) > 0 && (
+                  <div className="flex items-center justify-between rounded-lg bg-ink-50 px-3 py-2 text-sm">
+                    <span className="text-ink-600">Collect in cash</span>
+                    <span className="font-bold tabular text-ink-900">
+                      {formatCurrency(trip.driver_brief.cash_to_collect)}
+                    </span>
+                  </div>
+                )}
+
+                {trip.notes && (
+                  <div className="rounded-lg bg-amber-50 px-3 py-2 ring-1 ring-amber-200">
+                    <p className="text-xs font-semibold text-amber-900">Note</p>
+                    <p className="mt-0.5 text-xs text-amber-900">{trip.notes}</p>
+                  </div>
+                )}
+
+                {/* Both sides of the commitment, before they tap. */}
+                <div className="space-y-1 border-t border-ink-100 pt-3 text-xs text-ink-500">
+                  <p>
+                    Accepting holds{' '}
+                    <strong className="text-ink-700">
+                      {formatCurrency(trip.wallet_required)}
+                    </strong>{' '}
+                    from your wallet until the trip ends.
+                  </p>
+                  {trip.driver_brief?.cancellation_charge_near_pickup > 0 && (
+                    <p className="text-danger-700">
+                      Cancelling within {trip.driver_brief.critical_hours}{' '}
+                      {trip.driver_brief.critical_hours === 1 ? 'hour' : 'hours'} of pickup
+                      costs{' '}
+                      <strong>
+                        {formatCurrency(trip.driver_brief.cancellation_charge_near_pickup)}
+                      </strong>
+                      .
+                    </p>
+                  )}
+                </div>
+
+                <Button
+                  variant="brand"
+                  fullWidth
+                  disabled={!wallet?.eligible}
+                  onClick={() => setAccepting(trip)}
+                >
+                  Accept trip →
+                </Button>
               </CardBody>
             </Card>
           ))}
@@ -215,5 +295,41 @@ function AcceptModal({ trip, onClose, onAccepted }) {
         )}
       </div>
     </Modal>
+  )
+}
+
+
+/** One figure in the stat strip on an open-trip card. */
+function Stat({ label, value, strong = false }) {
+  return (
+    <div className="text-center">
+      <p className="text-[0.625rem] font-semibold uppercase tracking-wide text-ink-500">
+        {label}
+      </p>
+      <p
+        className={
+          strong
+            ? 'mt-0.5 text-base font-bold tabular text-brand-700'
+            : 'mt-0.5 text-base font-semibold tabular text-ink-900'
+        }
+      >
+        {value}
+      </p>
+    </div>
+  )
+}
+
+function Chip({ tone = 'neutral', children }) {
+  const tones = {
+    neutral: 'bg-ink-50 text-ink-600 ring-ink-100',
+    success: 'bg-success-50 text-success-700 ring-success-100',
+    warn: 'bg-amber-50 text-amber-800 ring-amber-200',
+  }
+  return (
+    <span
+      className={`inline-flex items-center rounded-md px-2 py-1 text-[0.6875rem] font-semibold ring-1 ${tones[tone]}`}
+    >
+      {children}
+    </span>
   )
 }

@@ -488,7 +488,7 @@ async def reject_withdrawal(
 
 
 def penalty_for_cancellation(
-    *, accepted_at: Any, scheduled_at: Any, settings: Any, now: Any
+    *, accepted_at: Any, scheduled_at: Any, settings: Any, now: Any, total_fare: float = 0.0
 ) -> dict[str, Any]:
     """What a driver owes for dropping a trip they had accepted.
 
@@ -502,10 +502,19 @@ def penalty_for_cancellation(
         hours_to_pickup = (scheduled_at - now).total_seconds() / 3600
 
     if hours_to_pickup is not None and hours_to_pickup <= float(settings.driver_late_hours):
+        flat = float(settings.driver_critical_penalty)
+        full_fare = round(float(total_fare or 0), 2)
+        # The whole fare, because that is the whole loss: this close to pickup
+        # the trip cannot be sold to anyone else. The flat figure is a floor for
+        # when the fare is unknown, never a discount on a known one.
+        charge = max(full_fare, flat) if settings.driver_critical_is_full_fare else flat
         return {
-            "amount": round(float(settings.driver_critical_penalty), 2),
+            "amount": round(charge, 2),
             "reason": (
-                f"Cancelled within {settings.driver_late_hours} hour(s) of pickup, "
+                f"Cancelled within {settings.driver_late_hours} hour(s) of pickup — "
+                "too late to arrange another car, so the full trip fare is charged."
+                if settings.driver_critical_is_full_fare and full_fare > 0
+                else f"Cancelled within {settings.driver_late_hours} hour(s) of pickup, "
                 "leaving no time to arrange another car."
             ),
             "band": "critical",

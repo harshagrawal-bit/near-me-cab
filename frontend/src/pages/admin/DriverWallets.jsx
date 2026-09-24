@@ -13,6 +13,7 @@ import { Alert, EmptyState, ErrorState, PageHeader } from '@/components/ui/State
 import { SkeletonStats } from '@/components/ui/Loaders'
 import { IconWallet } from '@/components/ui/Icons'
 import { useToast } from '@/components/ui/Toast'
+import { buildUpiLink, canPayByUpi, copyText } from '@/lib/upi'
 
 /**
  * Every driver's wallet on one screen.
@@ -233,6 +234,60 @@ function WalletActionModal({ action, onClose, onDone }) {
           Current balance <strong>{formatCurrency(row.balance)}</strong>
           {Number(row.held) > 0 && ` · ${formatCurrency(row.held)} held`}
         </p>
+
+        {/* Paying the driver for real. The app records the credit; this is how
+            the money actually moves, since a payment gateway can only refund
+            back the way it came. */}
+        {isPayout && (
+          <div className="rounded-xl border border-ink-100 bg-ink-50 p-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-ink-500">
+              Send the money
+            </p>
+
+            {canPayByUpi(row.bank_details) ? (
+              <>
+                <a
+                  href={buildUpiLink(row.bank_details, amount, `Payout ${row.name || ''}`)}
+                  className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg bg-ink-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-ink-800"
+                >
+                  Open UPI app and pay
+                  {Number(amount) > 0 ? ` ${formatCurrency(amount)}` : ''}
+                </a>
+                <p className="mt-1.5 text-center text-xs text-ink-500">
+                  Opens PhonePe, GPay or your bank app with{' '}
+                  <span className="font-mono">{row.bank_details.upi_id}</span> filled in.
+                  Works on your phone.
+                </p>
+              </>
+            ) : row.bank_details ? (
+              <>
+                <p className="mt-2 text-xs text-ink-600">
+                  This driver has given bank details but no UPI ID. A UPI link can only
+                  address a UPI ID, so transfer this one in your banking app.
+                </p>
+                <dl className="mt-2 space-y-1.5 text-sm">
+                  <CopyRow label="Account" value={row.bank_details.account_number_masked} muted />
+                  <CopyRow label="Name" value={row.bank_details.account_name} />
+                  <CopyRow label="IFSC" value={row.bank_details.ifsc} />
+                </dl>
+                <p className="mt-2 text-xs text-ink-400">
+                  The full account number is hidden here. Ask the driver to confirm it, or
+                  add their UPI ID to pay in one tap next time.
+                </p>
+              </>
+            ) : (
+              <p className="mt-2 text-xs text-amber-800">
+                No payout details on file. Ask the driver to add a UPI ID or bank account
+                in their wallet screen before you pay them.
+              </p>
+            )}
+
+            <p className="mt-3 border-t border-ink-200 pt-2 text-xs text-ink-500">
+              Send the money first, then record it below — the wallet credit is a record,
+              not the transfer.
+            </p>
+          </div>
+        )}
         <Field label="Amount (₹)" htmlFor="amt">
           <Input
             id="amt"
@@ -256,5 +311,33 @@ function WalletActionModal({ action, onClose, onDone }) {
         </Field>
       </div>
     </Modal>
+  )
+}
+
+
+/** One copyable payout detail. */
+function CopyRow({ label, value, muted = false }) {
+  const toast = useToast()
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <dt className="text-ink-500">{label}</dt>
+      <dd className="flex items-center gap-2">
+        <span className={muted ? 'font-mono text-ink-400' : 'font-mono text-ink-900'}>
+          {value || '—'}
+        </span>
+        {value && !muted && (
+          <button
+            type="button"
+            className="text-xs font-medium text-brand-700 hover:underline"
+            onClick={async () => {
+              const ok = await copyText(value)
+              toast[ok ? 'success' : 'error'](ok ? 'Copied.' : 'Could not copy.')
+            }}
+          >
+            Copy
+          </button>
+        )}
+      </dd>
+    </div>
   )
 }

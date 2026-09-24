@@ -503,8 +503,12 @@ function BankDetailsModal({ current, onClose, onSaved }) {
         <Field label="Bank name (optional)" htmlFor="bankname">
           <Input id="bankname" value={form.bank_name} onChange={set('bank_name')} />
         </Field>
-        <Field label="UPI ID (optional)" htmlFor="upi">
-          <Input id="upi" value={form.upi_id} onChange={set('upi_id')} />
+        <Field
+          label="UPI ID"
+          htmlFor="upi"
+          hint="Recommended — lets the office pay you in one tap. For example name@okhdfcbank."
+        >
+          <Input id="upi" value={form.upi_id} onChange={set('upi_id')} placeholder="name@okicici" />
         </Field>
       </div>
     </Modal>

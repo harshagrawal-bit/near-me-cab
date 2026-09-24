@@ -335,6 +335,32 @@ async def open_bookings(owner: dict[str, Any], limit: int = 50) -> list[dict[str
         # driver has even less claim to the number than an assigned one.
         hydrated = await booking_service.hydrate(doc, viewer_role=Role.DRIVER.value)
         hydrated["wallet_required"] = wallet_service.required_for_booking(doc, settings.wallet)
+
+        # What the driver needs to judge the job before taking it: what they
+        # stand to earn, what the trip involves, and what it costs them if they
+        # accept and then drop it. Shown up front rather than discovered later.
+        breakdown = doc.get("fare_breakdown") or {}
+        fare = float(doc.get("total_fare") or 0)
+        hydrated["driver_brief"] = {
+            "trip_fare": round(fare, 2),
+            # The route is attached by hydrate(), not present on the raw
+            # booking — reading it off `doc` silently produced no distance.
+            "distance_km": breakdown.get("distance_km")
+            or (hydrated.get("route") or {}).get("distance_km"),
+            "toll_included": float(breakdown.get("toll") or 0) > 0,
+            "driver_allowance_included": float(breakdown.get("driver_allowance") or 0) > 0,
+            "night_surcharge": float(breakdown.get("night_surcharge") or 0),
+            "advance_paid": float(doc.get("amount_paid") or 0),
+            "cash_to_collect": round(fare - float(doc.get("amount_paid") or 0), 2),
+            # Stated before accepting, because this is the number that decides
+            # whether the job is worth taking on a tight schedule.
+            "cancellation_charge_near_pickup": round(
+                max(fare, float(settings.cancellation.driver_critical_penalty)), 2
+            )
+            if settings.cancellation.driver_critical_is_full_fare
+            else float(settings.cancellation.driver_critical_penalty),
+            "critical_hours": settings.cancellation.driver_late_hours,
+        }
         out.append(hydrated)
     return out
 

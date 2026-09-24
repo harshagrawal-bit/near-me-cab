@@ -298,3 +298,67 @@ async def test_the_number_the_driver_actually_rings_is_masked_too(seeded):
 
     as_admin = await booking_service.hydrate(raw, viewer_role=Role.ADMIN.value)
     assert as_admin["passenger_phone"] == "9876543210"
+
+
+# ---------------------------------------------------------------------------
+# Full-fare penalty inside the critical window
+# ---------------------------------------------------------------------------
+
+
+def test_cancelling_near_pickup_costs_the_whole_fare():
+    """This close, the trip cannot be sold to anyone else — the loss is the fare."""
+    now = utcnow()
+    result = wallet_service.penalty_for_cancellation(
+        accepted_at=now - dt.timedelta(days=1),
+        scheduled_at=now + dt.timedelta(minutes=90),
+        settings=RULES,
+        now=now,
+        total_fare=8500.0,
+    )
+    assert result["band"] == "critical"
+    assert result["amount"] == 8500.0
+
+
+def test_the_flat_figure_is_a_floor_not_a_discount():
+    """A tiny fare still carries the flat charge; a large one is not capped by it."""
+    now = utcnow()
+    small = wallet_service.penalty_for_cancellation(
+        accepted_at=now, scheduled_at=now + dt.timedelta(minutes=30),
+        settings=RULES, now=now, total_fare=100.0,
+    )
+    assert small["amount"] == RULES.driver_critical_penalty
+
+    large = wallet_service.penalty_for_cancellation(
+        accepted_at=now, scheduled_at=now + dt.timedelta(minutes=30),
+        settings=RULES, now=now, total_fare=20000.0,
+    )
+    assert large["amount"] == 20000.0
+
+
+def test_two_hours_is_the_critical_boundary():
+    now = utcnow()
+    inside = wallet_service.penalty_for_cancellation(
+        accepted_at=now - dt.timedelta(days=1), scheduled_at=now + dt.timedelta(hours=1),
+        settings=RULES, now=now, total_fare=5000.0,
+    )
+    outside = wallet_service.penalty_for_cancellation(
+        accepted_at=now - dt.timedelta(days=1), scheduled_at=now + dt.timedelta(hours=5),
+        settings=RULES, now=now, total_fare=5000.0,
+    )
+    assert inside["band"] == "critical" and inside["amount"] == 5000.0
+    assert outside["band"] == "late" and outside["amount"] == RULES.driver_late_penalty
+
+
+async def test_a_full_fare_penalty_drives_the_wallet_negative(seeded):
+    """Intended: the driver owes the business, and cannot take work until square."""
+    driver_id = (await mongodb.drivers().insert_one({
+        "name": "Late Canceller", "user_id": ObjectId(), "driver_type": "owner",
+        "wallet_balance": 2000.0, "wallet_held": 0.0,
+    })).inserted_id
+
+    await wallet_service.charge_penalty(driver_id, 8500.0, reason="Cancelled 1 hour before pickup")
+
+    driver = await mongodb.drivers().find_one({"_id": driver_id})
+    assert driver["wallet_balance"] == -6500.0
+    verdict = await wallet_service.eligibility(driver)
+    assert verdict["eligible"] is False

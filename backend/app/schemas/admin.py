@@ -117,10 +117,16 @@ class CancellationSettings(ApiModel):
     driver_grace_minutes: int = Field(default=15, ge=0, le=240)
     driver_grace_penalty: float = Field(default=150, ge=0, le=10_000)
     driver_late_penalty: float = Field(default=300, ge=0, le=10_000)
-    #: Hours before pickup that counts as "late".
-    driver_late_hours: int = Field(default=1, ge=0, le=48)
-    #: Charged when a driver drops a trip inside the late window.
-    driver_critical_penalty: float = Field(default=500, ge=0, le=20_000)
+    #: Hours before pickup inside which a cancellation is "critical" — late
+    #: enough that the customer is effectively stranded.
+    driver_late_hours: int = Field(default=2, ge=0, le=48)
+    #: When true, a critical cancellation costs the driver the entire fare the
+    #: customer would have paid, not a flat fee. That is the actual damage: the
+    #: trip is lost and there is no time to sell it to anyone else. It can and
+    #: should push a wallet negative — the driver owes the business money.
+    driver_critical_is_full_fare: bool = True
+    #: Used when the fare is unknown, and as a floor under the full-fare rule.
+    driver_critical_penalty: float = Field(default=500, ge=0, le=100_000)
 
 
 class PaymentOptionSettings(ApiModel):
