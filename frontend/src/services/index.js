@@ -125,6 +125,7 @@ export const legalService = {
   privacy: () => api.get('/api/legal/privacy'),
   terms: () => api.get('/api/legal/terms'),
   vendorTerms: () => api.get('/api/legal/vendor-terms'),
+  walletRules: () => api.get('/api/legal/wallet-rules'),
 }
 
 export const fleetService = {

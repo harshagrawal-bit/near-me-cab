@@ -19,6 +19,11 @@ from app.services import settings_service
 router = APIRouter(prefix="/legal", tags=["legal"])
 
 
+def _hours(n: int) -> str:
+    """"1 hour" / "2 hours" — never "1 hour(s)", which reads like a form field."""
+    return f"{n} hour" if n == 1 else f"{n} hours"
+
+
 def _section(heading: str, body: list[str]) -> dict:
     return {"heading": heading, "body": body}
 
@@ -234,9 +239,9 @@ async def vendor_terms() -> dict:
                     "decides whether we can find another vehicle in time:",
                     f"Within {rules.driver_grace_minutes} minutes of accepting — "
                     f"₹{rules.driver_grace_penalty:,.0f}.",
-                    f"Later, but more than {rules.driver_late_hours} hour(s) before pickup — "
+                    f"Later, but more than {_hours(rules.driver_late_hours)} before pickup — "
                     f"₹{rules.driver_late_penalty:,.0f}.",
-                    f"Within {rules.driver_late_hours} hour(s) of pickup — "
+                    f"Within {_hours(rules.driver_late_hours)} of pickup — "
                     f"₹{rules.driver_critical_penalty:,.0f}.",
                     "The charge is deducted from your wallet and shown in your statement with "
                     "the reason.",
@@ -278,5 +283,70 @@ async def vendor_terms() -> dict:
                     f"{company.address}",
                 ],
             ),
+        ],
+    }
+
+
+@router.get("/wallet-rules", summary="The wallet terms, for the driver wallet screen")
+async def wallet_rules() -> dict:
+    """The money rules a driver is held to, in one small payload.
+
+    Pulled from the same settings the agreement and the wallet engine read, so
+    the note on the wallet screen cannot quietly disagree with the policy page
+    or with what the code actually charges.
+    """
+    settings = await settings_service.get_settings()
+    wallet = settings.wallet
+    rules = settings.cancellation
+    return {
+        "min_balance": wallet.min_balance,
+        "per_ride_percent": wallet.per_ride_percent,
+        "per_ride_min": wallet.per_ride_min,
+        "points": [
+            {
+                "title": "The minimum is yours, not a fee",
+                "body": (
+                    f"Keep at least ₹{wallet.min_balance:,.0f} to accept trips. It stays your "
+                    "money and you can withdraw it whenever it is not held."
+                ),
+            },
+            {
+                "title": "Each trip holds part of it",
+                "body": (
+                    f"Accepting a trip holds {wallet.per_ride_percent:.0f}% of the fare "
+                    f"(at least ₹{wallet.per_ride_min:,.0f}) until the trip ends. Held money "
+                    "cannot be withdrawn while the trip is live."
+                ),
+            },
+            {
+                "title": "Cancelling costs you",
+                "body": (
+                    f"Within {rules.driver_grace_minutes} minutes of accepting, "
+                    f"₹{rules.driver_grace_penalty:,.0f}. Later, "
+                    f"₹{rules.driver_late_penalty:,.0f}. "
+                    + (
+                        f"Within {_hours(rules.driver_late_hours)} of pickup you are charged the "
+                        "whole trip fare, which can leave your balance negative."
+                        if rules.driver_critical_is_full_fare
+                        else f"Within {_hours(rules.driver_late_hours)} of pickup, "
+                        f"₹{rules.driver_critical_penalty:,.0f}."
+                    )
+                ),
+            },
+            {
+                "title": "A negative balance blocks new work",
+                "body": (
+                    "If a charge takes you below the minimum you cannot accept trips until you "
+                    "top up. Nothing else is affected."
+                ),
+            },
+            {
+                "title": "Getting paid out",
+                "body": (
+                    "Your share of a trip is credited here by the office. Request a withdrawal "
+                    "and we transfer it to your account — the balance drops once the money has "
+                    "actually moved, not before."
+                ),
+            },
         ],
     }

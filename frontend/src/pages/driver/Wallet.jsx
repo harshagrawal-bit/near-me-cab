@@ -1,6 +1,7 @@
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useApi } from '@/hooks/useApi'
-import { fleetService, paymentService } from '@/services'
+import { fleetService, legalService, paymentService } from '@/services'
 import { formatCurrency, formatShortDateTime, titleCase } from '@/lib/format'
 import { Card, CardBody, CardHeader, StatCard } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
@@ -45,6 +46,7 @@ export default function DriverWallet() {
     [],
   )
   const { data: bank, refetch: refetchBank } = useApi(() => fleetService.bankDetails(), [])
+  const { data: rules } = useApi(() => legalService.walletRules(), [])
   const { data: payMethods } = useApi(() => paymentService.methods(), [])
   const onlineEnabled = Boolean(payMethods?.online_enabled)
   const toast = useToast()
@@ -337,6 +339,40 @@ export default function DriverWallet() {
           )}
         </CardBody>
       </Card>
+
+      {/* The rules that actually govern this balance, pulled from the same
+          settings the agreement and the charging code use — so this note
+          cannot quietly disagree with either. */}
+      {rules?.points?.length > 0 && (
+        <Card>
+          <CardHeader
+            title="How your wallet works"
+            description="The parts of the driver agreement that affect your money."
+          />
+          <CardBody>
+            <ul className="space-y-3">
+              {rules.points.map((point) => (
+                <li key={point.title} className="flex gap-2.5">
+                  <span
+                    aria-hidden="true"
+                    className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-brand-500"
+                  />
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-ink-900">{point.title}</p>
+                    <p className="mt-0.5 text-sm leading-relaxed text-ink-600">{point.body}</p>
+                  </div>
+                </li>
+              ))}
+            </ul>
+            <Link
+              to="/driver-terms"
+              className="mt-4 inline-block text-sm font-medium text-brand-700 hover:underline"
+            >
+              Read the full driver agreement →
+            </Link>
+          </CardBody>
+        </Card>
+      )}
 
       <Card>
         <CardHeader title="Statement" description="Every movement in and out of your wallet." />

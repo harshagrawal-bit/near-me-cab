@@ -8,7 +8,6 @@ import {
   IconCar,
   IconDocument,
   IconHome,
-  IconInbox,
   IconUser,
   IconWallet,
 } from '@/components/ui/Icons'
@@ -24,15 +23,14 @@ import {
  */
 const OWNER_NAV = [
   { to: '/driver', label: 'Home', icon: IconHome, end: true },
-  { to: '/driver/open-trips', label: 'Open', icon: IconInbox },
-  { to: '/driver/trips', label: 'Trips', icon: IconCar },
+  { to: '/driver/trips', label: 'My Trips', icon: IconCar },
   { to: '/driver/wallet', label: 'Wallet', icon: IconWallet },
   { to: '/driver/profile', label: 'Profile', icon: IconUser },
 ]
 
 const EMPLOYED_NAV = [
   { to: '/driver', label: 'Home', icon: IconHome, end: true },
-  { to: '/driver/trips', label: 'Trips', icon: IconCar },
+  { to: '/driver/trips', label: 'My Trips', icon: IconCar },
   { to: '/driver/earnings', label: 'Earnings', icon: IconWallet },
   { to: '/driver/documents', label: 'Documents', icon: IconDocument },
   { to: '/driver/profile', label: 'Profile', icon: IconUser },
