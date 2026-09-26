@@ -11,6 +11,7 @@ import { Field, Input, RadioCards, Select } from '@/components/ui/Field'
 import { Alert } from '@/components/ui/States'
 import { Skeleton } from '@/components/ui/Loaders'
 import { IconArrowRight, IconPin, IconTag } from '@/components/ui/Icons'
+import PlaceInput from '@/components/booking/PlaceInput'
 
 /** Tomorrow, 09:00 — a sensible default that always passes the lead-time rule. */
 function defaultDate() {
@@ -31,7 +32,8 @@ export default function CustomerHome() {
   const { data: offers } = useApi(() => couponService.offers(), [])
 
   const [form, setForm] = useState({
-    routeId: '',
+    pickup: '',
+    drop: '',
     tripType: 'one_way',
     date: defaultDate(),
     time: '09:00',
@@ -50,12 +52,18 @@ export default function CustomerHome() {
     return Array.from(map.entries()).sort(([a], [b]) => a.localeCompare(b))
   }, [routes])
 
-  const selectedRoute = routes.find((route) => route.id === form.routeId)
+  const norm = (value) => String(value || '').trim().toLowerCase()
+  const matchedRoute = routes.find(
+    (route) =>
+      norm(route.origin) === norm(form.pickup) && norm(route.destination) === norm(form.drop),
+  )
+  const bothFilled = form.pickup.trim().length > 1 && form.drop.trim().length > 1
+  const isNewRoute = bothFilled && !matchedRoute
 
   const onSubmit = (event) => {
     event.preventDefault()
-    if (!form.routeId) {
-      setError('Choose where you are travelling.')
+    if (!bothFilled) {
+      setError('Tell us where you are going from and to.')
       return
     }
     if (!form.date || !form.time) {
@@ -63,12 +71,16 @@ export default function CustomerHome() {
       return
     }
     setError(null)
+    // Send the places, not an id: the server resolves them to a route, which
+    // keeps one matching rule instead of one here and another there.
     const params = new URLSearchParams({
-      route_id: form.routeId,
+      pickup: form.pickup.trim(),
+      drop: form.drop.trim(),
       trip_type: form.tripType,
       date: form.date,
       time: form.time,
     })
+    if (matchedRoute) params.set('route_id', matchedRoute.id)
     navigate(`/app/search?${params.toString()}`)
   }
 
@@ -97,39 +109,43 @@ export default function CustomerHome() {
             />
           </Field>
 
-          <Field
-            label="Pickup and drop"
-            htmlFor="route"
-            required
-            hint={
-              selectedRoute
-                ? `${formatDistance(selectedRoute.distance_km)} · about ${formatDuration(
-                    selectedRoute.duration_minutes,
-                  )}`
-                : 'Choose from the routes we operate.'
-            }
-          >
-            {routesLoading ? (
-              <Skeleton className="h-11 w-full rounded-lg" />
-            ) : (
-              <Select
-                id="route"
-                value={form.routeId}
-                placeholder="Select a route"
-                onChange={(event) => setForm({ ...form, routeId: event.target.value })}
-              >
-                {grouped.map(([origin, items]) => (
-                  <optgroup key={origin} label={`From ${origin}`}>
-                    {items.map((route) => (
-                      <option key={route.id} value={route.id}>
-                        {route.name}
-                      </option>
-                    ))}
-                  </optgroup>
-                ))}
-              </Select>
-            )}
-          </Field>
+          <div className="space-y-3">
+            <PlaceInput
+              id="pickup"
+              label="From"
+              tone="pickup"
+              placeholder="Type a city or area"
+              value={form.pickup}
+              onChange={(value) => setForm({ ...form, pickup: value })}
+            />
+            <PlaceInput
+              id="drop"
+              label="To"
+              tone="drop"
+              placeholder="Where are you going?"
+              value={form.drop}
+              onChange={(value) => setForm({ ...form, drop: value })}
+            />
+          </div>
+
+          {matchedRoute && (
+            <p className="text-xs text-ink-500">
+              {formatDistance(matchedRoute.distance_km)} · about{' '}
+              {formatDuration(matchedRoute.duration_minutes)}
+            </p>
+          )}
+
+          {/* A trip we do not have a price for yet. Say so here rather than
+              letting them fill in a date and hit a dead end at the quote. */}
+          {isNewRoute && (
+            <Alert tone="info" title="We have not priced this route yet">
+              We can still arrange it — send us the trip and our team will come back with
+              a fare.{' '}
+              <Link to="/app/support" className="font-medium underline">
+                Request a quote
+              </Link>
+            </Alert>
+          )}
 
           <div className="grid grid-cols-2 gap-3">
             <Field label="Travel date" htmlFor="date" required>

@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '@/auth/AuthContext'
 import { useApi } from '@/hooks/useApi'
-import { driverService } from '@/services'
+import { driverService, fleetService } from '@/services'
 import { formatCurrency, formatShortDateTime } from '@/lib/format'
 import { cn } from '@/lib/cn'
 import Button from '@/components/ui/Button'
@@ -10,32 +10,24 @@ import { Card, CardBody, CardHeader, StatCard } from '@/components/ui/Card'
 import { Badge, StatusBadge } from '@/components/ui/Badge'
 import { Alert, EmptyState, ErrorState } from '@/components/ui/States'
 import { SkeletonStats, SkeletonList, Spinner } from '@/components/ui/Loaders'
-import { IconCar, IconPower } from '@/components/ui/Icons'
+import { IconCar, IconInbox } from '@/components/ui/Icons'
 import BookingCard from '@/components/booking/BookingCard'
 import TripActions from '@/components/driver/TripActions'
 import { useToast } from '@/components/ui/Toast'
+import Tabs from '@/components/ui/Tabs'
+import OpenTripList from '@/components/driver/OpenTripList'
 
 export default function DriverDashboard() {
   const { user } = useAuth()
   const toast = useToast()
   const { data, loading, error, refetch } = useApi(() => driverService.myDashboard(), [])
-  const [togglingAvailability, setTogglingAvailability] = useState(false)
+  const [tab, setTab] = useState('current')
+  const { data: open, refetch: refetchOpen } = useApi(() => fleetService.openBookings(), [])
+  const { data: wallet, refetch: refetchWallet } = useApi(() => fleetService.wallet(), [])
 
   const driver = data?.driver
   const isVerified = driver?.verification_status === 'verified'
-
-  const toggleAvailability = async () => {
-    setTogglingAvailability(true)
-    try {
-      const updated = await driverService.setAvailability(!driver.is_available)
-      toast.success(updated.is_available ? 'You are online.' : 'You are offline.')
-      refetch()
-    } catch (caught) {
-      toast.error(caught.message)
-    } finally {
-      setTogglingAvailability(false)
-    }
-  }
+  const openCount = open?.items?.length || 0
 
   if (loading) {
     return (
@@ -65,59 +57,6 @@ export default function DriverDashboard() {
         <StatusBadge kind="verification" status={driver?.verification_status} />
       </div>
 
-      {/* Availability toggle — the driver's single most-used control. */}
-      <Card
-        className={cn(
-          'p-4 transition-colors',
-          driver?.is_available && 'border-success-100 bg-success-50',
-        )}
-      >
-        <div className="flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <span
-              className={cn(
-                'flex h-10 w-10 shrink-0 items-center justify-center rounded-full',
-                driver?.is_available
-                  ? 'bg-success-600 text-white'
-                  : 'bg-ink-200 text-ink-500',
-              )}
-            >
-              {togglingAvailability ? (
-                <Spinner className="h-5 w-5" />
-              ) : (
-                <IconPower className="h-5 w-5" />
-              )}
-            </span>
-            <div>
-              <p className="font-semibold text-ink-900">
-                {driver?.is_available ? 'You are online' : 'You are offline'}
-              </p>
-              <p className="text-sm text-ink-600">
-                {driver?.is_available
-                  ? 'Available for new trip assignments.'
-                  : 'You will not be assigned new trips.'}
-              </p>
-            </div>
-          </div>
-          <Button
-            variant={driver?.is_available ? 'secondary' : 'brand'}
-            onClick={toggleAvailability}
-            loading={togglingAvailability}
-            disabled={!isVerified}
-          >
-            {driver?.is_available ? 'Go offline' : 'Go online'}
-          </Button>
-        </div>
-        {!isVerified && (
-          <Alert tone="warning" className="mt-3">
-            You can go online once the operations team verifies your documents.{' '}
-            <Link to="/driver/documents" className="font-medium underline">
-              View documents
-            </Link>
-          </Alert>
-        )}
-      </Card>
-
       <div className="grid grid-cols-2 gap-3">
         <StatCard
           label="Today's earnings"
@@ -132,42 +71,82 @@ export default function DriverDashboard() {
         />
       </div>
 
-      {data.current_trip ? (
-        <Card>
-          <CardHeader
-            title="Current trip"
-            action={<StatusBadge status={data.current_trip.status} />}
-          />
-          <CardBody className="space-y-4">
-            <div>
-              <p className="font-mono text-xs text-ink-500">{data.current_trip.booking_id}</p>
-              <p className="mt-1 font-semibold text-ink-900">
-                {data.current_trip.route?.name}
-              </p>
-              <p className="mt-1 text-sm text-ink-600">
-                {formatShortDateTime(data.current_trip.scheduled_at)}
-              </p>
-            </div>
-            <TripActions booking={data.current_trip} onUpdated={refetch} />
-            <Link to={`/driver/trips/${data.current_trip.id}`}>
-              <Button variant="secondary" fullWidth>
-                Open trip details
-              </Button>
-            </Link>
-          </CardBody>
-        </Card>
-      ) : (
-        <EmptyState
-          compact
-          icon={<IconCar />}
-          title="No trip in progress"
-          description={
-            driver?.is_available
-              ? 'You are online. New assignments will appear here.'
-              : 'Go online to start receiving trips.'
-          }
-        />
+      {!isVerified && (
+        <Alert tone="warning" title="Your documents are still being checked">
+          You can accept trips once the operations team verifies them.
+        </Alert>
       )}
+
+      <Tabs
+        variant="pill"
+        value={tab}
+        onChange={setTab}
+        tabs={[
+          { key: 'current', label: 'My trips' },
+          { key: 'open', label: 'Open trips', count: openCount },
+        ]}
+      />
+
+      {tab === 'open' ? (
+        <OpenTripList
+          items={open?.items}
+          wallet={wallet}
+          onChanged={() => {
+            refetchOpen()
+            refetchWallet()
+            refetch()
+          }}
+        />
+      ) : (
+        <>
+          {/* The trip in progress is the thing a driver opens the app for, so
+              it sits at the top where the online/offline switch used to be. */}
+          {data.current_trip ? (
+            <Card className="relative overflow-hidden border-brand-200">
+              <span aria-hidden="true" className="absolute inset-y-0 left-0 w-1 bg-brand-500" />
+              <CardHeader
+                title="Current trip"
+                action={<StatusBadge status={data.current_trip.status} />}
+              />
+              <CardBody className="space-y-4 pl-4">
+                <div>
+                  <p className="font-mono text-xs text-ink-500">
+                    {data.current_trip.booking_id}
+                  </p>
+                  <p className="mt-1 text-base font-bold text-ink-900">
+                    {data.current_trip.route?.name}
+                  </p>
+                  <p className="mt-1 text-sm text-ink-600">
+                    {formatShortDateTime(data.current_trip.scheduled_at)}
+                  </p>
+                </div>
+                <TripActions booking={data.current_trip} onUpdated={refetch} />
+                <Link to={`/driver/trips/${data.current_trip.id}`}>
+                  <Button variant="secondary" fullWidth>
+                    Open trip details
+                  </Button>
+                </Link>
+              </CardBody>
+            </Card>
+          ) : (
+            <EmptyState
+              compact
+              icon={<IconCar />}
+              title="No trip in progress"
+              description={
+                openCount > 0
+                  ? `${openCount} trip${openCount === 1 ? '' : 's'} waiting in Open trips.`
+                  : 'New trips will appear here once you accept one.'
+              }
+              action={
+                openCount > 0 ? (
+                  <Button variant="brand" onClick={() => setTab('open')}>
+                    See open trips
+                  </Button>
+                ) : null
+              }
+            />
+          )}
 
       <section>
         <div className="mb-2.5 flex items-center justify-between">
@@ -193,14 +172,16 @@ export default function DriverDashboard() {
       </section>
 
       {data.upcoming_trips.length > 0 && (
-        <section>
-          <h2 className="mb-2.5 text-sm font-semibold text-ink-900">Coming up</h2>
-          <div className="space-y-3">
-            {data.upcoming_trips.slice(0, 3).map((trip) => (
-              <BookingCard key={trip.id} booking={trip} to={`/driver/trips/${trip.id}`} />
-            ))}
-          </div>
-        </section>
+            <section>
+              <h2 className="mb-2.5 text-sm font-semibold text-ink-900">Coming up</h2>
+              <div className="space-y-3">
+                {data.upcoming_trips.slice(0, 3).map((trip) => (
+                  <BookingCard key={trip.id} booking={trip} to={`/driver/trips/${trip.id}`} />
+                ))}
+              </div>
+            </section>
+          )}
+        </>
       )}
     </div>
   )

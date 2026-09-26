@@ -29,6 +29,8 @@ export default function SearchResults() {
   const navigate = useNavigate()
 
   const routeId = params.get('route_id')
+  const pickup = params.get('pickup')
+  const drop = params.get('drop')
   const tripType = params.get('trip_type') || 'one_way'
   const date = params.get('date')
   const time = params.get('time') || '09:00'
@@ -40,16 +42,20 @@ export default function SearchResults() {
   const { data, loading, error, refetch } = useApi(
     () =>
       pricingService.quote({
-        route_id: routeId,
+        // Either identifies the trip; the server resolves places to a route,
+        // so a customer who typed their own wording still gets a quote.
+        route_id: routeId || undefined,
+        pickup: routeId ? undefined : pickup || undefined,
+        drop: routeId ? undefined : drop || undefined,
         trip_type: tripType,
         scheduled_at: scheduledAt,
         coupon_code: appliedCoupon || undefined,
       }),
-    [routeId, tripType, scheduledAt, appliedCoupon],
-    { enabled: Boolean(routeId) },
+    [routeId, pickup, drop, tripType, scheduledAt, appliedCoupon],
+    { enabled: Boolean(routeId || (pickup && drop)) },
   )
 
-  if (!routeId) {
+  if (!routeId && !(pickup && drop)) {
     return (
       <EmptyState
         title="No route selected"
@@ -68,12 +74,15 @@ export default function SearchResults() {
 
   const choose = (option) => {
     const search = new URLSearchParams({
-      route_id: routeId,
       trip_type: tripType,
       date,
       time,
       vehicle_type: option.vehicle_type,
     })
+    // Carry whichever identified the trip through to the booking form.
+    if (data?.route?.id || routeId) search.set('route_id', data?.route?.id || routeId)
+    if (pickup) search.set('pickup', pickup)
+    if (drop) search.set('drop', drop)
     if (appliedCoupon) search.set('coupon', appliedCoupon)
     navigate(`/app/book?${search.toString()}`)
   }

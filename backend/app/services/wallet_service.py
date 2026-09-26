@@ -95,6 +95,9 @@ async def eligibility(driver: dict[str, Any], booking: dict[str, Any] | None = N
         "available": available,
         "min_balance": floor,
         "required_for_trip": required,
+        # How far short they are, worked out here rather than in the app: the
+        # rule is one thing, and two copies of it drift.
+        "shortfall": round(max(0.0, floor - balance), 2),
         "eligible": meets_floor and meets_ride,
         "reason": reason,
         "driver_id": str(driver["_id"]) if driver.get("_id") else None,

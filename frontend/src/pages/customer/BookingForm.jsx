@@ -28,6 +28,8 @@ export default function BookingForm() {
   const [paymentOption, setPaymentOption] = useState('part')
 
   const routeId = params.get('route_id')
+  const pickupParam = params.get('pickup')
+  const dropParam = params.get('drop')
   const tripType = params.get('trip_type') || 'one_way'
   const vehicleType = params.get('vehicle_type')
   const date = params.get('date')
@@ -74,13 +76,14 @@ export default function BookingForm() {
   }, [user])
 
   useEffect(() => {
-    if (!route) return
+    // What the customer typed wins over the catalogue's wording for the route
+    // — they asked for "Pune Airport", not "Pune".
     setForm((current) => ({
       ...current,
-      pickupAddress: current.pickupAddress || route.origin,
-      dropAddress: current.dropAddress || route.destination,
+      pickupAddress: current.pickupAddress || pickupParam || route?.origin || '',
+      dropAddress: current.dropAddress || dropParam || route?.destination || '',
     }))
-  }, [route])
+  }, [route, pickupParam, dropParam])
 
   const savedLocations = user?.saved_locations || []
 
