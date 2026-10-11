@@ -33,6 +33,8 @@ export const authService = {
 /* --------------------------------------------------------------- users --- */
 
 export const userService = {
+  deletionCheck: () => api.get('/api/users/me/deletion-check'),
+  deleteAccount: (params) => api.delete('/api/users/me', { params }),
   me: () => api.get('/api/users/me'),
   updateProfile: (payload) => api.patch('/api/users/me', payload),
   appSettings: () => api.get('/api/users/me/settings'),
@@ -131,6 +133,9 @@ export const legalService = {
 export const fleetService = {
   bankDetails: () => api.get('/api/fleet/bank-details'),
   saveBankDetails: (payload) => api.put('/api/fleet/bank-details', payload),
+  /** Multipart: the scan itself, not a url to one. */
+  uploadDocument: (formData) => api.upload('/api/fleet/documents/upload', formData),
+  documentUrl: (key) => `/api/fleet/documents/${key}/file`,
   /** Ask for money back. An admin approves, which is what actually debits. */
   requestWithdrawal: (params) => api.post('/api/fleet/wallet/withdraw', null, { params }),
   withdrawals: () => api.get('/api/fleet/wallet/withdrawals'),

@@ -13,6 +13,7 @@ from app.core.errors import ConflictError, NotFoundError, ValidationError
 from app.core.timezone import local_date, start_of_local_day
 from app.db import mongodb
 from app.models.enums import (
+    ACTIVE_BOOKING_STATUSES,
     AccountStatus,
     BookingStatus,
     DocumentStatus,
@@ -393,3 +394,85 @@ async def earnings_summary(driver_id: ObjectId) -> dict[str, Any]:
         "lifetime": lifetime,
         "daily": daily,
     }
+
+
+async def score_for_booking(driver: dict[str, Any], booking: dict[str, Any]) -> dict[str, Any]:
+    """How good a match this driver is for this trip, and why.
+
+    The reason is returned alongside the number because an automatic
+    assignment that nobody can explain is one nobody will trust the first time
+    it picks oddly. It lands in the booking history.
+
+    Deliberately simple and readable rather than clever: every term is
+    something an operator would also weigh by hand.
+    """
+    from app.services import wallet_service
+
+    score = 0.0
+    notes: list[str] = []
+
+    # Hard requirement. A driver who cannot cover the hold cannot take the job,
+    # however good a match they otherwise are.
+    verdict = await wallet_service.eligibility(driver, booking)
+    if not verdict["eligible"]:
+        return {"score": -1.0, "eligible": False, "reason": verdict["reason"]}
+
+    vehicle = driver.get("vehicle") or {}
+    if vehicle.get("vehicle_type") == booking.get("vehicle_type"):
+        score += 50
+        notes.append("vehicle class matches")
+    elif vehicle.get("vehicle_type"):
+        # Wrong class is not disqualifying — an operator will sometimes send a
+        # bigger car — but it should never win against a correct one.
+        score -= 20
+        notes.append("different vehicle class")
+
+    rating = float(driver.get("rating_avg") or 0)
+    if rating:
+        score += rating * 4
+        notes.append(f"rated {rating:.1f}")
+
+    if driver.get("is_available"):
+        score += 10
+
+    # Spread the work. A driver with nothing on gets first refusal over one
+    # already carrying trips today, which keeps one person from taking everything.
+    active = await mongodb.bookings().count_documents(
+        {
+            "driver_id": driver["_id"],
+            "status": {"$in": [s.value for s in ACTIVE_BOOKING_STATUSES]},
+        }
+    )
+    score -= active * 15
+    if active:
+        notes.append(f"{active} trip(s) already running")
+
+    return {
+        "score": round(score, 2),
+        "eligible": True,
+        "reason": ", ".join(notes) or "available",
+        "active_trips": active,
+    }
+
+
+async def best_driver_for(booking: dict[str, Any]) -> dict[str, Any] | None:
+    """Pick the driver to assign, or nobody.
+
+    Returning None is a normal outcome, not a failure: if no one is eligible
+    the trip simply stays in the open pool for a driver to claim, which is
+    what would have happened without automatic assignment anyway.
+    """
+    candidates = await assignable_drivers(booking.get("vehicle_type"))
+    scored = []
+    for candidate in candidates:
+        raw = await mongodb.drivers().find_one({"_id": object_id(candidate["id"], "driver_id")})
+        if not raw:
+            continue
+        verdict = await score_for_booking({**raw, "vehicle": candidate.get("vehicle")}, booking)
+        if verdict["eligible"]:
+            scored.append({"driver": raw, "vehicle": candidate.get("vehicle"), **verdict})
+
+    if not scored:
+        return None
+    scored.sort(key=lambda item: item["score"], reverse=True)
+    return scored[0]

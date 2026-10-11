@@ -41,6 +41,11 @@ class BookingSettings(ApiModel):
     #: drivers pick it up from the open pool. Switch it off only if you want
     #: the office to check a car is free before anyone is asked to pay.
     auto_confirm: bool = True
+    #: Assign the best-matched driver the moment a booking is confirmed. Off by
+    #: default: picking drivers automatically is a change in how the business
+    #: runs, and an operator should switch it on deliberately. With it off,
+    #: confirmed trips sit in the open pool for drivers to claim.
+    auto_assign_driver: bool = False
 
 
 class AdvanceSettings(ApiModel):

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import DeleteAccount from '@/components/account/DeleteAccount'
 import { useAuth } from '@/auth/AuthContext'
 import { authService, userService } from '@/services'
 import Button from '@/components/ui/Button'
@@ -129,6 +130,7 @@ export default function Profile() {
           <ChangePassword />
         </div>
       </div>
+      <DeleteAccount />
     </div>
   )
 }

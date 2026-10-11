@@ -90,9 +90,11 @@ async function refreshAccessToken() {
   return refreshInFlight
 }
 
-async function performRequest(method, path, { body, params, signal, retry = true } = {}) {
+async function performRequest(method, path, { body, params, signal, retry = true, form } = {}) {
   const headers = {}
-  if (body !== undefined) headers['Content-Type'] = 'application/json'
+  // FormData sets its own Content-Type with a boundary; setting ours would
+  // produce a header the server cannot parse the body against.
+  if (body !== undefined && !form) headers['Content-Type'] = 'application/json'
   if (accessToken) headers.Authorization = `Bearer ${accessToken}`
 
   let response
@@ -102,7 +104,7 @@ async function performRequest(method, path, { body, params, signal, retry = true
       headers,
       credentials: 'include',
       signal,
-      body: body === undefined ? undefined : JSON.stringify(body),
+      body: body === undefined ? undefined : form ? body : JSON.stringify(body),
     })
   } catch (error) {
     if (error.name === 'AbortError') throw error
@@ -115,7 +117,7 @@ async function performRequest(method, path, { body, params, signal, retry = true
   if (response.status === 401 && retry && !path.startsWith('/api/auth/')) {
     const refreshed = await refreshAccessToken()
     if (refreshed) {
-      return performRequest(method, path, { body, params, signal, retry: false })
+      return performRequest(method, path, { body, params, signal, form, retry: false })
     }
     accessToken = null
     onUnauthenticated()
@@ -140,6 +142,9 @@ export const api = {
   put: (path, body, options) => performRequest('PUT', path, { ...options, body }),
   patch: (path, body, options) => performRequest('PATCH', path, { ...options, body }),
   delete: (path, options) => performRequest('DELETE', path, options),
+  /** Multipart upload — pass a FormData as the body. */
+  upload: (path, formData, options) =>
+    performRequest('POST', path, { ...options, body: formData, form: true }),
   refresh: refreshAccessToken,
 }
 

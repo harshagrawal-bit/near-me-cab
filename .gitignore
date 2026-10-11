@@ -41,3 +41,7 @@ logs/
 
 # Reference screenshots shared for design work, not part of the app.
 WhatsApp*/
+
+# Uploaded driver documents — identity scans, never committed.
+backend/uploads/
+uploads/

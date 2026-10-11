@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import datetime as dt
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, Response, status
 
 from app.api.deps import AdminUser, CurrentDriver, DriverUser, Pagination
 from app.core.rate_limit import write_rate_limit
 from app.db import mongodb
-from app.core.errors import ValidationError
+from app.core.errors import NotFoundError, ValidationError
 from app.models.enums import ACTIVE_BOOKING_STATUSES, BookingStatus, WalletTxnType
 from app.schemas.common import Message, object_id, serialize, utcnow
 from app.schemas.fleet import AvailabilityUpdate, DriverCreate, DriverSelfUpdate, DriverUpdate
@@ -361,3 +361,22 @@ async def charge_penalty(driver_id: str, payload: PenaltyCharge, admin: AdminUse
         booking_id=object_id(payload.booking_id, "booking_id") if payload.booking_id else None,
         actor_id=str(admin["_id"]),
     )
+
+
+@router.get(
+    "/{driver_id}/documents/{key}/file",
+    summary="Download a driver's document (admin)",
+)
+async def admin_download_document(driver_id: str, key: str, admin: AdminUser) -> Response:
+    """Admins verify documents, so they must be able to actually see them."""
+    from app.services import storage_service
+
+    driver = await mongodb.drivers().find_one(
+        {"_id": object_id(driver_id, "driver_id")}, {"documents": 1}
+    )
+    if not driver:
+        raise NotFoundError("Driver not found.")
+    if key not in {doc.get("file_url") for doc in (driver.get("documents") or [])}:
+        raise NotFoundError("File not found.")
+    data, content_type = storage_service.read_document(key)
+    return Response(content=data, media_type=content_type)

@@ -77,6 +77,11 @@ class Settings(BaseSettings):
     #: Verifies that a webhook really came from Razorpay. Server-side only.
     RAZORPAY_WEBHOOK_SECRET: str = ""
 
+    # ---- Uploads ----
+    #: Where driver documents are written. A directory on the server, not a
+    #: public path — files are served only through an authenticated route.
+    UPLOAD_DIR: str = "./uploads"
+
     # ---- Messaging ----
     #: Numbers are stored as 10 digits; providers want E.164. Prefixed with
     #: this unless the stored number already carries a country code.

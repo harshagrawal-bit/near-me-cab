@@ -377,11 +377,20 @@ export default function AdminSettings() {
               </div>
 
               <Checkbox
-                label="Auto-confirm new bookings"
-                description="Skips manual confirmation. Leave off if you want to check availability first."
+                label="Instant booking"
+                description="Customers pay and confirm without waiting for your team. Leave off if you want to check a car is free first."
                 checked={booking.auto_confirm}
                 onChange={(event) =>
                   setBooking({ ...booking, auto_confirm: event.target.checked })
+                }
+              />
+
+              <Checkbox
+                label="Assign drivers automatically"
+                description="Picks the best-matched driver the moment a booking is confirmed. Off means confirmed trips wait in the open pool for a driver to claim."
+                checked={booking.auto_assign_driver || false}
+                onChange={(event) =>
+                  setBooking({ ...booking, auto_assign_driver: event.target.checked })
                 }
               />
 

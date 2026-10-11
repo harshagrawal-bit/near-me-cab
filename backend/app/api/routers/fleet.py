@@ -7,11 +7,12 @@ belongs to, so it cannot claim someone else's.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, File, Form, Query, Response, UploadFile, status
 
 from app.api.deps import CurrentUser, require_roles
 from app.core.rate_limit import write_rate_limit
 from app.models.enums import Role
+from app.core.errors import NotFoundError, ValidationError
 from app.schemas.common import Message, object_id
 from app.schemas.wallet import (
     BankDetails,
@@ -21,7 +22,7 @@ from app.schemas.wallet import (
     SubDriverCreate,
     WalletSummary,
 )
-from app.services import driver_service, fleet_service, wallet_service
+from app.services import driver_service, fleet_service, storage_service, wallet_service
 
 router = APIRouter(
     prefix="/fleet",
@@ -166,6 +167,60 @@ async def submit_document(payload: DocumentUpload, user: CurrentUser) -> dict:
 # ---------------------------------------------------------------------------
 # Work
 # ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/documents/upload",
+    dependencies=[Depends(write_rate_limit)],
+    summary="Upload a licence, RC or insurance scan",
+)
+async def upload_document_file(
+    user: CurrentUser,
+    file: UploadFile = File(...),
+    type: str = Form(...),
+    number: str | None = Form(None),
+    expires_on: str | None = Form(None),
+) -> dict:
+    """Store the scan and attach it to the driver, always as PENDING.
+
+    Multipart rather than a JSON url, because the previous shape assumed a
+    file already living somewhere — which meant drivers could not actually
+    submit anything and the verification queue was decorative.
+    """
+    import datetime as dt
+
+    driver = await driver_service.require_driver_for_user(user["_id"])
+    data = await file.read()
+    key = storage_service.save_document(
+        data, file.content_type or "", prefix=type[:12].replace("/", "")
+    )
+
+    parsed_expiry = None
+    if expires_on:
+        try:
+            parsed_expiry = dt.date.fromisoformat(expires_on)
+        except ValueError:
+            raise ValidationError("Enter the expiry date as YYYY-MM-DD.")
+
+    return await fleet_service.upload_document(
+        driver["_id"],
+        DocumentUpload(type=type, number=number, file_url=key, expires_on=parsed_expiry),
+    )
+
+
+@router.get("/documents/{key}/file", summary="Download one of my documents")
+async def download_my_document(key: str, user: CurrentUser) -> Response:
+    """Serving these through a route, not statically, is the whole point.
+
+    Identity documents behind a guessable public URL are a breach waiting to
+    happen, so every read re-checks that this file belongs to this driver.
+    """
+    driver = await driver_service.require_driver_for_user(user["_id"])
+    owned = {doc.get("file_url") for doc in (driver.get("documents") or [])}
+    if key not in owned:
+        raise NotFoundError("File not found.")
+    data, content_type = storage_service.read_document(key)
+    return Response(content=data, media_type=content_type)
 
 
 @router.get("/open-bookings", summary="Confirmed trips I could accept")

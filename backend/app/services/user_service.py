@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from bson import ObjectId
@@ -12,6 +13,8 @@ from app.core.security import hash_password
 from app.db import mongodb
 from app.models.enums import AccountStatus, Role
 from app.schemas.common import serialize, utcnow
+
+logger = logging.getLogger("localride.users")
 
 PUBLIC_PROJECTION = {"password_hash": 0}
 
@@ -125,3 +128,114 @@ async def get_admin_recipients() -> list[ObjectId]:
         {"role": Role.ADMIN.value, "status": AccountStatus.ACTIVE.value}, {"_id": 1}
     )
     return [doc["_id"] async for doc in cursor]
+
+
+async def deletion_blockers(user: dict[str, Any]) -> list[str]:
+    """Reasons this account cannot be closed yet, in words the user can act on.
+
+    Checked before anything is removed so someone is told why up front rather
+    than discovering it halfway through.
+    """
+    from app.models.enums import ACTIVE_BOOKING_STATUSES, Role
+
+    blockers: list[str] = []
+
+    live = await mongodb.bookings().count_documents(
+        {
+            "customer_id": user["_id"],
+            "status": {"$in": [s.value for s in ACTIVE_BOOKING_STATUSES]},
+        }
+    )
+    if live:
+        blockers.append(
+            f"You have {live} trip{'s' if live > 1 else ''} in progress. "
+            "Those need to finish first."
+        )
+
+    if user.get("role") == Role.DRIVER.value:
+        driver = await mongodb.drivers().find_one({"user_id": user["_id"]})
+        if driver:
+            balance = float(driver.get("wallet_balance") or 0)
+            held = float(driver.get("wallet_held") or 0)
+            # A negative balance is money owed to the business. Letting the
+            # account close would write the debt off silently, so it is the one
+            # blocker with no self-service way around it.
+            if balance < 0:
+                blockers.append(
+                    f"Your wallet is ₹{abs(balance):,.0f} overdrawn. "
+                    "Clear the balance before closing your account."
+                )
+            if held > 0:
+                blockers.append(
+                    f"₹{held:,.0f} is still held against trips in progress."
+                )
+            assigned = await mongodb.bookings().count_documents(
+                {
+                    "driver_id": driver["_id"],
+                    "status": {"$in": [s.value for s in ACTIVE_BOOKING_STATUSES]},
+                }
+            )
+            if assigned:
+                blockers.append(
+                    f"You have {assigned} assigned trip{'s' if assigned > 1 else ''} to complete."
+                )
+
+    return blockers
+
+
+async def delete_account(user: dict[str, Any], *, reason: str | None = None) -> dict[str, Any]:
+    """Close an account, keeping only what we are obliged to keep.
+
+    Not a hard delete of everything the person touched: bookings and payments
+    are financial records with their own retention rules, and tearing them out
+    would leave the ledger unable to explain itself. What goes is the identity
+    — name, email, phone, saved addresses — which is what the privacy policy
+    promises and what someone asking to be forgotten actually means.
+
+    The email is released rather than kept as a tombstone, so the same person
+    can sign up again later without support having to intervene.
+    """
+    blockers = await deletion_blockers(user)
+    if blockers:
+        raise ConflictError(" ".join(blockers))
+
+    from app.models.enums import Role
+
+    now = utcnow()
+    anonymous = f"deleted-{str(user['_id'])[-8:]}"
+
+    if user.get("role") == Role.DRIVER.value:
+        await mongodb.drivers().update_many(
+            {"user_id": user["_id"]},
+            {
+                "$set": {
+                    "status": "inactive",
+                    "is_available": False,
+                    "deleted_at": now,
+                    "updated_at": now,
+                },
+                # Licence numbers and bank details are the most sensitive
+                # things we hold; they go immediately.
+                "$unset": {"bank_details": "", "documents": ""},
+            },
+        )
+
+    await mongodb.users().update_one(
+        {"_id": user["_id"]},
+        {
+            "$set": {
+                "name": "Deleted user",
+                "email": f"{anonymous}@deleted.invalid",
+                "phone": None,
+                "saved_locations": [],
+                "status": AccountStatus.SUSPENDED.value,
+                "deleted_at": now,
+                "deletion_reason": reason,
+                "updated_at": now,
+                # Nobody can sign in as this account again.
+                "password_hash": "!deleted",
+            }
+        },
+    )
+    logger.info("Closed account %s", user["_id"])
+    return {"deleted": True, "message": "Your account has been closed."}

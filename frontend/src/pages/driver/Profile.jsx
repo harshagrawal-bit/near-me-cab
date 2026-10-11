@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import DeleteAccount from '@/components/account/DeleteAccount'
 import { Link } from 'react-router-dom'
 import { useApi } from '@/hooks/useApi'
 import { authService, driverService } from '@/services'
@@ -191,6 +192,7 @@ export default function DriverProfile() {
           <ChangePassword />
         </div>
       </div>
+      <DeleteAccount />
     </div>
   )
 }

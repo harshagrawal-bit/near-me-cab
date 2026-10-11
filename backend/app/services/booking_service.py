@@ -10,6 +10,8 @@ Two rules are load-bearing here:
 
 from __future__ import annotations
 
+import logging
+
 import datetime as dt
 import os
 import re
@@ -58,6 +60,8 @@ from app.services import (
 
 # Prefix on every human-facing booking reference (NM-20260806-0001).
 # Existing references keep whatever prefix they were created with.
+logger = logging.getLogger("localride.bookings")
+
 BOOKING_PREFIX = os.getenv("BOOKING_PREFIX", "NM")
 
 
@@ -451,6 +455,7 @@ async def confirm_availability(
                 "balance_due": advance["balance_due"],
             },
         )
+        await try_auto_assign(booking_oid)
         return await require_booking(booking_oid)
 
     await _apply_status(
@@ -516,6 +521,8 @@ async def pay_advance(
         note=f"Advance of ₹{amount:,.0f} received.",
         extra={"advance_status": AdvanceStatus.PAID.value, "advance_paid_at": now},
     )
+    # Paid and confirmed is the moment a trip becomes assignable.
+    await try_auto_assign(booking_oid)
     return await require_booking(booking_oid)
 
 
@@ -1190,3 +1197,41 @@ async def customer_buckets(customer_id: ObjectId) -> dict[str, int]:
         "cancelled": counts.get(BookingStatus.CANCELLED.value, 0),
         "total": sum(counts.values()),
     }
+
+
+async def try_auto_assign(booking_oid: ObjectId) -> dict[str, Any] | None:
+    """Assign the best-matched driver, if the operator has asked us to.
+
+    Never raises into whatever confirmed the booking. Finding nobody suitable
+    is an ordinary outcome — the trip stays in the open pool, exactly as it
+    would without this — and a failure here must not undo a confirmation the
+    customer has already paid for.
+    """
+    from app.services import driver_service, settings_service
+
+    try:
+        config = await settings_service.get_settings()
+        if not config.booking.auto_assign_driver:
+            return None
+
+        booking = await _raw_booking(booking_oid)
+        if booking.get("driver_id") or booking["status"] != BookingStatus.CONFIRMED.value:
+            return None
+
+        choice = await driver_service.best_driver_for(booking)
+        if not choice:
+            logger.info("No eligible driver for %s; left in the open pool", booking["booking_id"])
+            return None
+
+        vehicle = choice.get("vehicle") or {}
+        await assign_driver(
+            booking_oid,
+            choice["driver"]["_id"],
+            vehicle_oid=object_id(vehicle["id"], "vehicle_id") if vehicle.get("id") else None,
+            actor_id=None,
+            note=f"Auto-assigned — {choice['reason']}.",
+        )
+        return {"driver_id": str(choice["driver"]["_id"]), "reason": choice["reason"]}
+    except Exception:
+        logger.exception("Auto-assign failed for %s", booking_oid)
+        return None
