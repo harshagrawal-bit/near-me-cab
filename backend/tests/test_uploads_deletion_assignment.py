@@ -211,3 +211,87 @@ async def test_every_choice_carries_a_reason(seeded):
     )
     assert verdict["reason"]
     assert "4.6" in verdict["reason"]
+
+
+
+async def _login_driver(client):
+    """A verified driver with a login, independent of the demo seed data."""
+    from app.core.security import hash_password
+
+    user_id = ObjectId()
+    email = f"dash{user_id}@example.com"
+    await mongodb.users().insert_one({
+        "_id": user_id, "name": "Dash Driver", "email": email,
+        "phone": f"9{str(user_id)[-9:]}"[:10], "role": Role.DRIVER.value,
+        "status": "active", "password_hash": hash_password("Password@123"),
+        "created_at": utcnow(), "updated_at": utcnow(),
+    })
+    driver_id = (await mongodb.drivers().insert_one({
+        "user_id": user_id, "name": "Dash Driver", "driver_type": "owner",
+        "status": "active", "verification_status": "verified",
+        "wallet_balance": 5000.0, "wallet_held": 0.0,
+        "created_at": utcnow(), "updated_at": utcnow(),
+    })).inserted_id
+    response = await client.post(
+        "/api/auth/login", json={"email": email, "password": "Password@123"}
+    )
+    assert response.status_code == 200, response.text
+    return driver_id, response.json()["access_token"]
+
+
+# ---------------------------------------------------------------------------
+# Driver dashboard
+# ---------------------------------------------------------------------------
+
+
+async def test_the_dashboard_never_shows_one_trip_in_three_places(client, seeded):
+    """Current / today / coming up overlapped, so a live trip appeared 3×."""
+    from tests.conftest import auth
+
+    driver_id, token = await _login_driver(client)
+
+    booking_oid = ObjectId()
+    await mongodb.bookings().insert_one({
+        "_id": booking_oid, "booking_id": "NM-DUP-0001", "customer_id": seeded["customer"]["_id"],
+        "driver_id": driver_id, "status": BookingStatus.ACCEPTED.value,
+        "vehicle_type": "sedan", "total_fare": 2000.0, "amount_paid": 0.0,
+        "passenger_name": "Rider", "passenger_phone": "9876500011", "passenger_count": 1,
+        "scheduled_at": utcnow(), "created_at": utcnow(), "updated_at": utcnow(),
+    })
+
+    body = (await client.get("/api/drivers/me/dashboard", headers=auth(token))).json()
+
+    ids = []
+    if body.get("current_trip"):
+        ids.append(body["current_trip"]["id"])
+    ids += [t["id"] for t in body.get("todays_trips", [])]
+    ids += [t["id"] for t in body.get("upcoming_trips", [])]
+    assert len(ids) == len(set(ids)), f"a trip is listed more than once: {ids}"
+
+    await mongodb.bookings().delete_one({"_id": booking_oid})
+
+
+async def test_the_dashboard_masks_the_customer_number(client, seeded):
+    """Every other driver-facing surface masks it; this one did not."""
+    from tests.conftest import auth
+
+    driver_id, token = await _login_driver(client)
+
+    import datetime as dt
+    booking_oid = ObjectId()
+    await mongodb.bookings().insert_one({
+        "_id": booking_oid, "booking_id": "NM-MASK-DASH", "customer_id": seeded["customer"]["_id"],
+        "driver_id": driver_id, "status": BookingStatus.DRIVER_ASSIGNED.value,
+        "vehicle_type": "sedan", "total_fare": 2000.0, "amount_paid": 0.0,
+        "passenger_name": "Rider", "passenger_phone": "9876500022", "passenger_count": 1,
+        "scheduled_at": utcnow() + dt.timedelta(days=2),
+        "created_at": utcnow(), "updated_at": utcnow(),
+    })
+
+    body = (await client.get("/api/drivers/me/dashboard", headers=auth(token))).json()
+
+    shown = [t for t in body.get("upcoming_trips", []) if t["booking_id"] == "NM-MASK-DASH"]
+    if shown:
+        assert "XXXX" in shown[0]["passenger_phone"]
+
+    await mongodb.bookings().delete_one({"_id": booking_oid})

@@ -10,7 +10,7 @@ from app.api.deps import AdminUser, CurrentDriver, DriverUser, Pagination
 from app.core.rate_limit import write_rate_limit
 from app.db import mongodb
 from app.core.errors import NotFoundError, ValidationError
-from app.models.enums import ACTIVE_BOOKING_STATUSES, BookingStatus, WalletTxnType
+from app.models.enums import ACTIVE_BOOKING_STATUSES, BookingStatus, Role, WalletTxnType
 from app.schemas.common import Message, object_id, serialize, utcnow
 from app.schemas.fleet import AvailabilityUpdate, DriverCreate, DriverSelfUpdate, DriverUpdate
 from app.schemas.wallet import DriverPayout, PenaltyCharge, WalletAdjustment, WalletTopUp
@@ -67,6 +67,15 @@ async def my_dashboard(driver: CurrentDriver) -> dict:
     start_of_day = utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
     end_of_day = start_of_day + dt.timedelta(days=1)
 
+    # The live trip first, because the other two lists are defined by what it
+    # is not. Without that order all three overlapped and the same booking
+    # appeared three times on one screen.
+    current = await mongodb.bookings().find_one(
+        {"driver_id": driver["_id"], "status": {"$in": [s.value for s in ACTIVE_BOOKING_STATUSES]}},
+        sort=[("scheduled_at", 1)],
+    )
+    current_id = current["_id"] if current else None
+
     todays_cursor = (
         mongodb.bookings()
         .find(
@@ -74,25 +83,27 @@ async def my_dashboard(driver: CurrentDriver) -> dict:
                 "driver_id": driver["_id"],
                 "scheduled_at": {"$gte": start_of_day, "$lt": end_of_day},
                 "status": {"$ne": BookingStatus.CANCELLED.value},
+                **({"_id": {"$ne": current_id}} if current_id else {}),
             }
         )
         .sort("scheduled_at", 1)
     )
-    todays_trips = [await booking_service.hydrate(doc) async for doc in todays_cursor]
+    todays_trips = [
+        await booking_service.hydrate(doc, viewer_role=Role.DRIVER.value)
+        async for doc in todays_cursor
+    ]
 
-    current = await mongodb.bookings().find_one(
-        {"driver_id": driver["_id"], "status": {"$in": list(ACTIVE_BOOKING_STATUSES)}},
-        sort=[("scheduled_at", 1)],
-    )
+    # "Coming up" means later than today — anything today is already above it.
     upcoming_cursor = (
         mongodb.bookings()
         .find(
             {
                 "driver_id": driver["_id"],
-                "scheduled_at": {"$gte": utcnow()},
+                "scheduled_at": {"$gte": end_of_day},
                 "status": {
                     "$nin": [BookingStatus.CANCELLED.value, BookingStatus.COMPLETED.value]
                 },
+                **({"_id": {"$ne": current_id}} if current_id else {}),
             }
         )
         .sort("scheduled_at", 1)
@@ -103,10 +114,17 @@ async def my_dashboard(driver: CurrentDriver) -> dict:
         "driver": profile,
         "earnings": earnings,
         "todays_trips": todays_trips,
-        "current_trip": await booking_service.hydrate(current, include_history=True)
+        # viewer_role matters: without it this endpoint hands a driver every
+        # customer's real phone number, which the rest of the app masks.
+        "current_trip": await booking_service.hydrate(
+            current, include_history=True, viewer_role=Role.DRIVER.value
+        )
         if current
         else None,
-        "upcoming_trips": [await booking_service.hydrate(doc) async for doc in upcoming_cursor],
+        "upcoming_trips": [
+            await booking_service.hydrate(doc, viewer_role=Role.DRIVER.value)
+            async for doc in upcoming_cursor
+        ],
     }
 
 

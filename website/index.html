@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>NearMe Cab — Outstation cabs, airport transfers and local trips</title>
+<meta name="description" content="Book outstation cabs, airport transfers and local trips with verified drivers and fares agreed up front. No surge pricing, no surprises." />
+<link rel="stylesheet" href="./styles.css" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23151515'/%3E%3Cpath d='M16 28s8-8.9 8-14A8 8 0 1 0 8 14c0 5.1 8 14 8 14Z' fill='none' stroke='%23d81f26' stroke-width='2.6' stroke-linejoin='round'/%3E%3C/svg%3E" />
+</head>
+<body>
+
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="#top">
+      <svg width="28" height="30" viewBox="0 0 44 46" fill="none" aria-hidden="true">
+        <path d="M31.5 11a11.5 11.5 0 0 1 0 13" stroke="#d81f26" stroke-width="2.6" stroke-linecap="round"/>
+        <path d="M36.8 6.4a18.5 18.5 0 0 1 0 22.2" stroke="#d81f26" stroke-width="2.6" stroke-linecap="round" opacity=".55"/>
+        <path d="M15 44s13-14.5 13-23A13 13 0 1 0 2 21c0 8.5 13 23 13 23Z" fill="#d81f26"/>
+        <path d="M8.6 23.4v-2.6l1.9-4.2a2 2 0 0 1 1.8-1.2h6.2a2 2 0 0 1 1.8 1.2l1.9 4.2v2.6a.85.85 0 0 1-.85.85h-1.2a1.5 1.5 0 0 1-3 0h-3.4a1.5 1.5 0 0 1-3 0h-1.2a.85.85 0 0 1-.85-.85Z" fill="#fff"/>
+      </svg>
+      <span class="brand-name">NearMe</span><span class="brand-chip">CAB</span>
+    </a>
+    <div class="header-actions">
+      <a class="btn btn-ghost" id="headerCall" href="tel:">Call us</a>
+      <a class="btn btn-dark" href="#book">Book a cab</a>
+    </div>
+  </div>
+</header>
+
+<main id="top">
+
+  <section class="hero">
+    <div class="wrap hero-grid">
+      <div>
+        <h1>Outstation cabs, airport transfers and local trips.</h1>
+        <p class="lead">
+          Clean cars, verified drivers and the fare agreed before you travel.
+          No surge pricing, no surprises at the drop.
+        </p>
+        <ul class="hero-points">
+          <li><span class="tick">✓</span><span>Fixed fares published before you book</span></li>
+          <li><span class="tick">✓</span><span>Verified drivers with documents on file</span></li>
+          <li><span class="tick">✓</span><span>No account needed — book in under a minute</span></li>
+        </ul>
+      </div>
+
+      <!-- Booking form. Everything it needs comes from the same API the app
+           uses, so a booking made here is indistinguishable from one made in
+           the app once it reaches operations. -->
+      <div class="card" id="book">
+        <div class="card-pad">
+          <h2>Get a fare estimate</h2>
+          <p class="sub">No sign-up. We will call you to confirm.</p>
+
+          <form id="bookingForm" novalidate>
+            <div class="pills" role="group" aria-label="Trip type">
+              <button type="button" class="pill" data-trip="one_way" aria-pressed="true">One way</button>
+              <button type="button" class="pill" data-trip="round_trip" aria-pressed="false">Round trip</button>
+              <button type="button" class="pill" data-trip="airport" aria-pressed="false">Airport</button>
+              <button type="button" class="pill" data-trip="local" aria-pressed="false">Local</button>
+            </div>
+
+            <div class="field">
+              <label for="pickup">From</label>
+              <input id="pickup" name="pickup" type="text" autocomplete="off" placeholder="Pickup city or area" required />
+            </div>
+
+            <div class="field">
+              <label for="drop">To</label>
+              <input id="drop" name="drop" type="text" autocomplete="off" placeholder="Where are you going?" required />
+            </div>
+
+            <div class="row">
+              <div class="field">
+                <label for="date">Date</label>
+                <input id="date" name="date" type="date" required />
+              </div>
+              <div class="field">
+                <label for="time">Time</label>
+                <input id="time" name="time" type="time" value="09:00" required />
+              </div>
+            </div>
+
+            <button type="button" class="btn btn-dark btn-block" id="quoteBtn">Show fares</button>
+
+            <div id="quoteArea"></div>
+
+            <!-- Revealed once a vehicle is chosen: asking for a phone number
+                 before showing a price is how booking forms get abandoned. -->
+            <div id="detailsArea" hidden>
+              <div class="row">
+                <div class="field">
+                  <label for="name">Your name</label>
+                  <input id="name" name="name" type="text" placeholder="Full name" required />
+                </div>
+                <div class="field">
+                  <label for="phone">Mobile number</label>
+                  <input id="phone" name="phone" type="tel" inputmode="numeric" placeholder="10 digits" required />
+                </div>
+              </div>
+              <div class="row">
+                <div class="field">
+                  <label for="passengers">Passengers</label>
+                  <input id="passengers" name="passengers" type="number" min="1" max="30" value="2" />
+                </div>
+                <div class="field">
+                  <label for="email">Email (optional)</label>
+                  <input id="email" name="email" type="email" placeholder="you@example.com" />
+                </div>
+              </div>
+              <div class="field">
+                <label for="notes">Anything we should know? (optional)</label>
+                <input id="notes" name="notes" type="text" placeholder="Child seat, extra luggage…" />
+              </div>
+
+              <button type="submit" class="btn btn-primary btn-block" id="submitBtn">Request this cab</button>
+              <p class="hint" id="payHint">You pay the driver at the end of the trip. Nothing to pay now.</p>
+            </div>
+          </form>
+
+          <div id="formMessage" role="status" aria-live="polite"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="band">
+    <div class="wrap">
+      <div class="section-head">
+        <h2>Why people book with us</h2>
+        <p>The things that actually matter on a long drive.</p>
+      </div>
+      <div class="grid-3">
+        <div class="feature">
+          <div class="icon">💰</div>
+          <h3>The price you were quoted</h3>
+          <p>The fare is worked out before you book and does not move. Tolls, parking and state permits are stated up front.</p>
+        </div>
+        <div class="feature">
+          <div class="icon">🪪</div>
+          <h3>Drivers we have checked</h3>
+          <p>Licence, registration and insurance are on file and verified before a driver takes a single trip.</p>
+        </div>
+        <div class="feature">
+          <div class="icon">🕑</div>
+          <h3>Free cancellation</h3>
+          <p id="cancelCopy">Cancel well before pickup and you pay nothing.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="band alt">
+    <div class="wrap">
+      <div class="section-head">
+        <h2>Popular routes</h2>
+        <p>Tap one to load it into the booking form.</p>
+      </div>
+      <div class="routes" id="routeList">
+        <p class="hint">Loading routes…</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="band">
+    <div class="wrap">
+      <div class="section-head">
+        <h2>Already booked?</h2>
+        <p>Check your trip with the reference we sent you.</p>
+      </div>
+      <div class="card" style="max-width:560px;margin:0 auto">
+        <div class="card-pad">
+          <div class="row">
+            <div class="field">
+              <label for="trackRef">Booking reference</label>
+              <input id="trackRef" type="text" placeholder="NM-20261018-0001" />
+            </div>
+            <div class="field">
+              <label for="trackPhone">Mobile number</label>
+              <input id="trackPhone" type="tel" inputmode="numeric" placeholder="10 digits" />
+            </div>
+          </div>
+          <button type="button" class="btn btn-ghost btn-block" id="trackBtn">Check my booking</button>
+          <div id="trackResult" role="status" aria-live="polite"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer class="site">
+  <div class="wrap">
+    <div class="foot-grid">
+      <div>
+        <div class="brand" style="color:#fff;margin-bottom:10px">
+          <span class="brand-name">NearMe</span><span class="brand-chip">CAB</span>
+        </div>
+        <p style="margin:0;font-size:.875rem;max-width:40ch">
+          Outstation cabs, airport transfers and local trips across Maharashtra and beyond.
+        </p>
+      </div>
+      <div>
+        <h4>Contact</h4>
+        <ul>
+          <li><a id="footPhone" href="tel:">—</a></li>
+          <li><a id="footEmail" href="mailto:">—</a></li>
+          <li id="footAddress">—</li>
+          <li id="footHours">—</li>
+        </ul>
+      </div>
+      <div>
+        <h4>Legal</h4>
+        <ul>
+          <li><a id="linkPrivacy" href="#">Privacy policy</a></li>
+          <li><a id="linkTerms" href="#">Terms of service</a></li>
+          <li><a id="linkDriver" href="#">Drive with us</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="foot-bottom">
+      <span id="footLegalName">NearMe Cab</span> · All rights reserved.
+    </div>
+  </div>
+</footer>
+
+<a class="call-fab" id="callFab" href="tel:">Call to book</a>
+
+<script src="./app.js"></script>
+</body>
+</html>

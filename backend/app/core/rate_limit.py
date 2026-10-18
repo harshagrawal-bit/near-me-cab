@@ -72,3 +72,9 @@ refresh_rate_limit = RateLimiter(
 write_rate_limit = RateLimiter(
     "write", settings.WRITE_RATE_LIMIT, settings.WRITE_RATE_WINDOW_SECONDS
 )
+
+#: Public, unauthenticated endpoints. Tighter than the signed-in write limit
+#: because there is no account behind a caller here — only an IP — so the only
+#: thing standing between a scripted form and a few thousand junk bookings is
+#: this number.
+public_rate_limit = RateLimiter("public", 20, 60)
