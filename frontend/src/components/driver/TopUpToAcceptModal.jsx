@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { formatCurrency } from '@/lib/format'
 import Button from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
@@ -28,8 +28,15 @@ export default function TopUpToAcceptModal({ open, onClose, wallet, trip, onTopp
     Math.ceil((shortfall + Math.max(0, holdNeeded - available)) / 100) * 100,
   )
 
-  const [amount, setAmount] = useState(String(suggested))
+  const [amount, setAmount] = useState('')
   const [paying, setPaying] = useState(false)
+
+  // The modal stays mounted, so useState only ever ran once — on the first
+  // render, when there was no trip and no wallet yet. That left the input at
+  // the floor while the table above it showed the real figure.
+  useEffect(() => {
+    if (open) setAmount(String(suggested))
+  }, [open, suggested])
 
   async function pay() {
     const rupees = Number(amount)
@@ -50,6 +57,9 @@ export default function TopUpToAcceptModal({ open, onClose, wallet, trip, onTopp
       if (err?.cancelled) return
       if (err?.pending) {
         toast.info('Payment received. Your balance updates once the bank confirms.')
+        // Close regardless: leaving them on the top-up sheet after paying
+        // reads as though the payment failed.
+        onToppedUp()
         return
       }
       toast.error(err?.message || 'The payment did not go through.')

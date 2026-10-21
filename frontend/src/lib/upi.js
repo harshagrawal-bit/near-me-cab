@@ -15,7 +15,7 @@
 
 /** Is there enough here to build a working link? */
 export function canPayByUpi(bank) {
-  return Boolean(bank?.upi_id && /^[\w.\-]{2,}@[a-zA-Z]{2,}$/.test(bank.upi_id))
+  return Boolean(bank?.upi_id && /^[\w.-]{2,}@[a-zA-Z]{2,}$/.test(bank.upi_id))
 }
 
 /**

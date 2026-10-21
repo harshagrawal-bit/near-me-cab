@@ -144,7 +144,7 @@ export default function AdminDrivers() {
               tone="warning"
               title={`${withdrawals.items.length} withdrawal request(s) waiting`}
             >
-              Transfer the money first, then approve — approving is what debits the driver's
+              Transfer the money first, then approve — approving is what debits the driver&apos;s
               wallet, so doing it beforehand shows a balance they have not received.
             </Alert>
             <ul className="mt-4 divide-y divide-ink-100">

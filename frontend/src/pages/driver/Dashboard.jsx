@@ -1,24 +1,18 @@
-import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { useAuth } from '@/auth/AuthContext'
 import { useApi } from '@/hooks/useApi'
 import { driverService, fleetService } from '@/services'
-import { formatCurrency, formatShortDateTime } from '@/lib/format'
-import { cn } from '@/lib/cn'
+import { formatShortDateTime } from '@/lib/format'
 import Button from '@/components/ui/Button'
-import { Card, CardBody, CardHeader, StatCard } from '@/components/ui/Card'
-import { Badge, StatusBadge } from '@/components/ui/Badge'
+import { Card, CardBody, CardHeader } from '@/components/ui/Card'
+import { StatusBadge } from '@/components/ui/Badge'
 import { Alert, EmptyState, ErrorState } from '@/components/ui/States'
-import { SkeletonStats, SkeletonList, Spinner } from '@/components/ui/Loaders'
-import { IconCar, IconInbox } from '@/components/ui/Icons'
+import { SkeletonStats, SkeletonList } from '@/components/ui/Loaders'
+import { IconCar } from '@/components/ui/Icons'
 import BookingCard from '@/components/booking/BookingCard'
 import TripActions from '@/components/driver/TripActions'
-import { useToast } from '@/components/ui/Toast'
 import OpenTripList from '@/components/driver/OpenTripList'
 
 export default function DriverDashboard() {
-  const { user } = useAuth()
-  const toast = useToast()
   const { data, loading, error, refetch } = useApi(() => driverService.myDashboard(), [])
   const { data: open, refetch: refetchOpen } = useApi(() => fleetService.openBookings(), [])
   const { data: wallet, refetch: refetchWallet } = useApi(() => fleetService.wallet(), [])
@@ -108,7 +102,7 @@ export default function DriverDashboard() {
 
       <section>
         <div className="mb-2.5 flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-ink-900">Today's schedule</h2>
+          <h2 className="text-sm font-semibold text-ink-900">Today&apos;s schedule</h2>
           <Link to="/driver/trips" className="text-sm font-medium text-brand-700 hover:underline">
             All trips
           </Link>

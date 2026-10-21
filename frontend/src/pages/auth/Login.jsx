@@ -6,11 +6,13 @@ import Logo from '@/components/brand/Logo'
 import Button from '@/components/ui/Button'
 import { Field, Input } from '@/components/ui/Field'
 import { Alert } from '@/components/ui/States'
+import { useToast } from '@/components/ui/Toast'
 import { IconCheck } from '@/components/ui/Icons'
 import { FullPageLoader } from '@/components/ui/Loaders'
 import GoogleButton from '@/components/auth/GoogleButton'
 
 export default function Login() {
+  const toast = useToast()
   const { login, adoptSession, isAuthenticated, role, initialising } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()

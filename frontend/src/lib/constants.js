@@ -152,6 +152,9 @@ export const TERMINAL_STATUSES = ['completed', 'cancelled']
 /** Statuses in which a customer may still cancel. */
 export const CUSTOMER_CANCELLABLE = [
   'requested',
+  // Deciding not to pay the advance is the commonest reason to cancel, so the
+  // screen that asks for it must not be the one screen with no way out.
+  'awaiting_payment',
   'confirmed',
   'driver_assigned',
   'accepted',

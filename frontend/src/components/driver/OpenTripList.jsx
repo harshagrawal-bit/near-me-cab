@@ -88,7 +88,18 @@ export default function OpenTripList({ items, wallet, onChanged }) {
 
                 {/* The three numbers that decide whether to take the job. */}
                 <div className="grid grid-cols-3 gap-2 rounded-xl bg-brand-50/60 p-3">
-                  <Stat label="You earn" value={formatCurrency(trip.driver_brief?.trip_fare ?? trip.total_fare)} strong />
+                  {/* Never fall back to total_fare: that is the customer's gross fare,
+                      and showing it under "You earn" invites a driver to accept
+                      on a number they will not receive. */}
+                  <Stat
+                    label="You earn"
+                    value={
+                      trip.driver_brief?.trip_fare != null
+                        ? formatCurrency(trip.driver_brief.trip_fare)
+                        : '—'
+                    }
+                    strong
+                  />
                   <Stat
                     label="Distance"
                     value={

@@ -13,6 +13,19 @@ import { EmptyState, ErrorState } from './States'
  *   { key, header, render(row), align, className, headerClassName,
  *     card: 'title' | 'meta' | 'aside' | 'hidden' }
  */
+/**
+ * A click on a row opens it — unless it started on a control inside the row.
+ *
+ * Without this, any button placed in a row fires its own handler *and* the
+ * row's navigation, which unmounts the page before the button's effect can be
+ * seen. Putting the guard here rather than on each call site means a future
+ * in-row button cannot reintroduce the bug.
+ */
+function rowActivate(event, row, onRowClick) {
+  if (event.target.closest('button, a, input, select, textarea, label')) return
+  onRowClick?.(row)
+}
+
 export default function DataTable({
   columns,
   rows,
@@ -74,7 +87,7 @@ export default function DataTable({
               {rows.map((row, index) => (
                 <tr
                   key={getRowKey(row, index)}
-                  onClick={onRowClick ? () => onRowClick(row) : undefined}
+                  onClick={onRowClick ? (event) => rowActivate(event, row, onRowClick) : undefined}
                   className={cn(
                     'transition-colors',
                     onRowClick && 'cursor-pointer hover:bg-ink-50',
@@ -106,12 +119,14 @@ export default function DataTable({
         {rows.map((row, index) => (
           <div
             key={getRowKey(row, index)}
-            onClick={onRowClick ? () => onRowClick(row) : undefined}
+            onClick={onRowClick ? (event) => rowActivate(event, row, onRowClick) : undefined}
             role={onRowClick ? 'button' : undefined}
             tabIndex={onRowClick ? 0 : undefined}
             onKeyDown={
               onRowClick
                 ? (event) => {
+                    // Space inside an in-row control belongs to that control.
+                    if (event.target.closest('button, a, input, select, textarea')) return
                     if (event.key === 'Enter' || event.key === ' ') {
                       event.preventDefault()
                       onRowClick(row)

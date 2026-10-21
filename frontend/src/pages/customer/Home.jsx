@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '@/auth/AuthContext'
 import { useApi } from '@/hooks/useApi'
@@ -7,9 +7,8 @@ import { TRIP_TYPES } from '@/lib/constants'
 import { formatDistance, formatDuration, toDateInputValue } from '@/lib/format'
 import Button from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
-import { Field, Input, RadioCards, Select } from '@/components/ui/Field'
+import { Field, Input, RadioCards } from '@/components/ui/Field'
 import { Alert } from '@/components/ui/States'
-import { Skeleton } from '@/components/ui/Loaders'
 import { IconArrowRight, IconPin, IconTag } from '@/components/ui/Icons'
 import PlaceInput from '@/components/booking/PlaceInput'
 
@@ -24,7 +23,7 @@ export default function CustomerHome() {
   const { user } = useAuth()
   const navigate = useNavigate()
 
-  const { data: routesPage, loading: routesLoading } = useApi(
+  const { data: routesPage } = useApi(
     () => routeService.list({ page_size: 100 }),
     [],
   )
@@ -41,16 +40,6 @@ export default function CustomerHome() {
   const [error, setError] = useState(null)
 
   const routes = routesPage?.items || []
-
-  // Group by origin so a long catalogue stays navigable in a single select.
-  const grouped = useMemo(() => {
-    const map = new Map()
-    routes.forEach((route) => {
-      if (!map.has(route.origin)) map.set(route.origin, [])
-      map.get(route.origin).push(route)
-    })
-    return Array.from(map.entries()).sort(([a], [b]) => a.localeCompare(b))
-  }, [routes])
 
   const norm = (value) => String(value || '').trim().toLowerCase()
   const matchedRoute = routes.find(
@@ -202,7 +191,9 @@ export default function CustomerHome() {
                 key={route.id}
                 type="button"
                 onClick={() => {
-                  setForm({ ...form, routeId: route.id })
+                  // The form is keyed on the typed places now, not a route id —
+                  // writing routeId here filled in nothing and only scrolled.
+                  setForm({ ...form, pickup: route.origin, drop: route.destination })
                   window.scrollTo({ top: 0, behavior: 'smooth' })
                 }}
                 className="flex items-center justify-between gap-3 rounded-card border border-ink-200 bg-white p-3.5 text-left shadow-card transition-colors hover:border-ink-300"

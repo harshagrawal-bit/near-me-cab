@@ -352,7 +352,9 @@ export default function BookingDetail() {
 
           {!canCancel && !isCancelled && !isCompleted && (
             <Alert tone="neutral">
-              This trip is under way. Call support if you need to make a change.
+              {['driver_arriving', 'picked_up', 'trip_started'].includes(booking.status)
+                ? 'This trip is under way. Call support if you need to make a change.'
+                : 'This booking can no longer be cancelled in the app. Call support and we will help.'}
             </Alert>
           )}
 
