@@ -44,8 +44,27 @@ store = _MemoryStore()
 
 
 def _client_key(request: Request, scope: str) -> str:
-    forwarded = request.headers.get("x-forwarded-for", "")
-    ip = forwarded.split(",")[0].strip() if forwarded else (request.client.host if request.client else "unknown")
+    """Identify the caller for rate-limiting purposes.
+
+    Reads `X-Forwarded-For` from the **right**, not the left, and only as many
+    hops as we actually run. The leftmost entry is whatever the client sent —
+    nginx's `proxy_add_x_forwarded_for` appends the real address rather than
+    replacing the header — so trusting position 0 let anyone defeat every limit
+    in the app by varying one header, and grow the bucket store without bound
+    while doing it.
+
+    With `TRUSTED_PROXY_HOPS = 0` (the default, and correct for a server
+    reached directly) the header is ignored entirely.
+    """
+    hops = settings.TRUSTED_PROXY_HOPS
+    direct = request.client.host if request.client else "unknown"
+    if hops <= 0:
+        return f"{scope}:{direct}"
+
+    chain = [part.strip() for part in request.headers.get("x-forwarded-for", "").split(",") if part.strip()]
+    # The last entry was written by our own proxy; step back one per extra hop.
+    index = len(chain) - hops
+    ip = chain[index] if 0 <= index < len(chain) else direct
     return f"{scope}:{ip}"
 
 

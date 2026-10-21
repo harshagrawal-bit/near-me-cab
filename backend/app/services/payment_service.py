@@ -81,6 +81,17 @@ async def _amount_for_balance(user: dict[str, Any], booking_oid: ObjectId) -> di
         raise NotFoundError("Booking not found.")
     if booking["status"] == BookingStatus.CANCELLED.value:
         raise ConflictError("This booking was cancelled.")
+    # Before confirmation there is no "balance" — the outstanding figure is the
+    # whole fare, and paying it here would take 100% while leaving the booking
+    # in AWAITING_PAYMENT, so no driver ever sees it. That money belongs in the
+    # advance flow, which does move the status.
+    if booking["status"] in {
+        BookingStatus.REQUESTED.value,
+        BookingStatus.AWAITING_PAYMENT.value,
+    }:
+        raise ConflictError(
+            "This booking is not confirmed yet. Pay the advance to confirm it first."
+        )
     outstanding = round(
         float(booking.get("total_fare") or 0) - float(booking.get("amount_paid") or 0), 2
     )
@@ -265,6 +276,9 @@ async def _perform(intent: dict[str, Any], *, payment_id: str) -> None:
                 note="Paid online via Razorpay",
             ),
             actor_id=intent["user_id"],
+            # Recorded as what it is, so both refund paths can find it.
+            provider="razorpay",
+            kind="balance",
         )
     elif purpose == PURPOSE_WALLET_TOPUP:
         await wallet_service.credit(
@@ -311,21 +325,36 @@ async def refund_booking_advance(
     """
     booking_oid = booking["_id"]
 
-    if booking.get("advance_status") == AdvanceStatus.REFUNDED.value:
+    # Read the ledger rather than branching on advance_status: a ₹1 goodwill
+    # refund used to flip that flag and permanently block the customer's real
+    # refund. The money actually taken and the money actually returned are both
+    # facts in the ledger; the flag is only a summary of them.
+    rows = [
+        doc
+        async for doc in mongodb.payments().find(
+            {"booking_id": booking_oid, "kind": {"$ne": "refund"}}
+        )
+    ]
+    paid_rows = [r for r in rows if float(r.get("amount") or 0) > 0]
+    if not paid_rows:
+        return {"refunded": False, "reason": "nothing was paid on this booking"}
+
+    already = 0.0
+    async for doc in mongodb.payments().find({"booking_id": booking_oid, "kind": "refund"}):
+        already += abs(float(doc.get("amount") or 0))
+
+    paid = sum(float(r.get("amount") or 0) for r in paid_rows)
+    refundable = round(max(paid - already - float(fee or 0), 0), 2)
+    if refundable <= 0 and already > 0:
         return {"refunded": False, "reason": "already refunded"}
-    if booking.get("advance_status") != AdvanceStatus.PAID.value:
-        return {"refunded": False, "reason": "no advance was paid"}
 
-    # The advance ledger row tells us how it was paid. A cash or manually
-    # recorded advance has no gateway payment to reverse.
-    payment = await mongodb.payments().find_one(
-        {"booking_id": booking_oid, "kind": "advance", "status": PaymentStatus.PAID.value}
-    )
-    if not payment:
-        return {"refunded": False, "reason": "no advance payment on record"}
-
-    paid = float(payment.get("amount") or 0)
-    refundable = round(max(paid - float(fee or 0), 0), 2)
+    # Reverse against the largest gateway row, so a part refund need not be
+    # split across several payments.
+    gateway = [
+        r for r in paid_rows
+        if r.get("provider") == "razorpay" and isinstance(r.get("provider_reference"), str)
+    ]
+    payment = max(gateway, key=lambda r: float(r.get("amount") or 0)) if gateway else paid_rows[0]
     if refundable <= 0:
         await mongodb.bookings().update_one(
             {"_id": booking_oid},
@@ -358,6 +387,7 @@ async def refund_booking_advance(
     await _record_refund(
         booking, payment, amount=refundable, provider="razorpay",
         reference=refund.get("id"), status="processed", reason=reason,
+        retained=float(fee or 0),
     )
     return {"refunded": True, "amount": refundable, "reference": refund.get("id")}
 
@@ -371,6 +401,7 @@ async def _record_refund(
     reference: str | None,
     status: str,
     reason: str,
+    retained: float = 0.0,
 ) -> None:
     """Write the refund to the ledger and mark the booking.
 
@@ -379,6 +410,20 @@ async def _record_refund(
     worse than useless.
     """
     now = utcnow()
+    # Everything taken, and everything already given back, before this row.
+    taken = 0.0
+    returned = 0.0
+    async for doc in mongodb.payments().find({"booking_id": booking["_id"]}):
+        value = float(doc.get("amount") or 0)
+        if doc.get("kind") == "refund":
+            returned += abs(value)
+        elif value > 0:
+            taken += value
+    # A cancellation fee is money we are entitled to keep, so it counts towards
+    # settling the debt even though it was never returned. Without this a
+    # correctly-settled refund-less-fee would look partial forever.
+    fully_refunded = (returned + abs(amount) + float(retained or 0)) >= (taken - 0.5)
+
     await mongodb.payments().insert_one(
         {
             "booking_id": booking["_id"],
@@ -405,9 +450,12 @@ async def _record_refund(
         {"_id": booking["_id"]},
         {
             "$set": {
+                # Only "refunded" once the money returned actually covers what
+                # was taken. A ₹1 goodwill refund used to flip this and lock the
+                # customer out of their real ₹599.
                 "advance_status": (
                     AdvanceStatus.REFUNDED.value
-                    if status == "processed"
+                    if status == "processed" and fully_refunded
                     else AdvanceStatus.PAID.value
                 ),
                 "refund_amount": abs(amount),

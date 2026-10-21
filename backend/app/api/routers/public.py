@@ -42,7 +42,7 @@ logger = logging.getLogger("localride.public")
 router = APIRouter(prefix="/public", tags=["public"])
 
 
-@router.get("/company", summary="Company details for the website")
+@router.get("/company", dependencies=[Depends(public_rate_limit)], summary="Company details for the website")
 async def company() -> dict:
     settings = await settings_service.get_settings()
     return {
@@ -53,7 +53,7 @@ async def company() -> dict:
     }
 
 
-@router.get("/routes", summary="Routes we operate")
+@router.get("/routes", dependencies=[Depends(public_rate_limit)], summary="Routes we operate")
 async def routes(limit: int = Query(60, ge=1, le=200)) -> dict:
     page = await route_service.list_routes(1, limit, is_active=True)
     return {
@@ -71,12 +71,12 @@ async def routes(limit: int = Query(60, ge=1, le=200)) -> dict:
     }
 
 
-@router.get("/places", summary="Place suggestions for the booking form")
+@router.get("/places", dependencies=[Depends(public_rate_limit)], summary="Place suggestions for the booking form")
 async def places(q: str = Query("", max_length=60)) -> list[dict]:
     return await maps_service.suggest_places(q)
 
 
-@router.get("/vehicle-classes", summary="Vehicle classes offered")
+@router.get("/vehicle-classes", dependencies=[Depends(public_rate_limit)], summary="Vehicle classes offered")
 async def vehicle_classes() -> list[dict]:
     from app.services import vehicle_service
 
@@ -146,7 +146,7 @@ async def create_booking(payload: PublicBookingRequest) -> dict:
     }
 
 
-@router.get("/bookings/{reference}", summary="Check a booking without logging in")
+@router.get("/bookings/{reference}", dependencies=[Depends(public_rate_limit)], summary="Check a booking without logging in")
 async def track(reference: str, phone: str = Query(..., min_length=10, max_length=15)) -> dict:
     """Look up one booking by its reference *and* the phone that made it.
 
@@ -154,6 +154,12 @@ async def track(reference: str, phone: str = Query(..., min_length=10, max_lengt
     guessing sequential references.
     """
     digits = "".join(ch for ch in phone if ch.isdigit())[-10:]
+    # A phone of letters normalises to "", which matched the empty stored phone
+    # of every Google sign-up and every closed account — turning a sequential
+    # reference into a readable booking for anyone who guessed it.
+    if len(digits) != 10:
+        raise NotFoundError("No booking with that reference.")
+
     booking = await mongodb.bookings().find_one({"booking_id": reference.strip().upper()})
     if not booking:
         raise NotFoundError("No booking with that reference.")
@@ -161,7 +167,8 @@ async def track(reference: str, phone: str = Query(..., min_length=10, max_lengt
     customer = await mongodb.users().find_one({"_id": booking["customer_id"]}, {"phone": 1})
     stored = "".join(ch for ch in str((customer or {}).get("phone") or "") if ch.isdigit())[-10:]
     booked_phone = "".join(ch for ch in str(booking.get("passenger_phone") or "") if ch.isdigit())[-10:]
-    if digits not in {stored, booked_phone}:
+    # Falsy entries stripped: an absent stored phone must never match.
+    if digits not in {p for p in (stored, booked_phone) if p}:
         # Same message as a missing reference, so a wrong phone cannot be used
         # to confirm that a reference exists.
         raise NotFoundError("No booking with that reference.")

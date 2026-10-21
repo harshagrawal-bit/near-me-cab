@@ -571,9 +571,16 @@ async def driver_cancel(
 ) -> dict[str, Any]:
     """A driver drops a trip they had accepted, and pays for it.
 
-    The penalty is charged before the booking moves, so a driver cannot dodge
-    it by cancelling twice in quick succession — the second call finds a
-    booking already cancelled and stops.
+    The booking is claimed *first*, with the current status as a precondition,
+    and only the caller that wins the claim is charged. The previous order —
+    charge, then move — meant that when the move failed the already-committed
+    wallet debit stayed, so a driver tapping a failing button three times lost
+    three full fares. Claiming first makes a repeat tap a no-op.
+
+    The penalty and the hold both settle against the fleet owner when there is
+    one: an employed driver's wallet is empty by design, and charging it would
+    put the cost on someone who holds no deposit while leaving the owner's hold
+    stranded.
     """
     from app.services import wallet_service
 
@@ -593,25 +600,46 @@ async def driver_cancel(
         now=utcnow(),
         total_fare=float(booking.get("total_fare") or 0),
     )
+
+    # Claim it. Only the caller that actually moves the booking pays, so a
+    # second tap finds nothing to claim and charges nothing.
+    claimed = await mongodb.bookings().find_one_and_update(
+        {"_id": booking_oid, "status": booking["status"], "driver_id": driver["_id"]},
+        {
+            "$set": {
+                "status": BookingStatus.CONFIRMED.value,
+                "driver_id": None,
+                "vehicle_id": None,
+                "accepted_at": None,
+                # Cleared with driver_id: leaving it set lets a later owner's
+                # accept overwrite it and strand the first owner's hold.
+                "fleet_owner_id": None,
+                "updated_at": utcnow(),
+            }
+        },
+    )
+    if not claimed:
+        raise ConflictError("This trip has already moved on. Refresh and try again.")
+
+    # Whoever's deposit is actually backing this trip.
+    payer = booking.get("fleet_owner_id") or driver["_id"]
     charged = await wallet_service.charge_penalty(
-        driver["_id"],
+        payer,
         penalty["amount"],
         reason=penalty["reason"],
         booking_id=booking_oid,
         actor_id=str(driver["user_id"]),
     )
+    await wallet_service.release(payer, booking_oid)
 
-    # Back to CONFIRMED, not CANCELLED: the customer still wants the trip, so
-    # it returns to the pool for another driver rather than being killed off.
-    await _apply_status(
-        booking,
-        BookingStatus.CONFIRMED,
+    await _record_history(
+        booking_oid,
+        booking["status"],
+        BookingStatus.CONFIRMED.value,
         actor_id=driver["user_id"],
         actor_role=Role.DRIVER.value,
         note=f"Driver cancelled: {reason}. Penalty ₹{penalty['amount']:,.0f}.",
-        extra={"driver_id": None, "vehicle_id": None, "accepted_at": None},
     )
-    await wallet_service.release(driver["_id"], booking_oid)
 
     await notification_service.notify(
         user_id=driver["user_id"],
@@ -907,8 +935,21 @@ async def override_fare(
 
 
 async def record_payment(
-    booking_oid: ObjectId, payload: PaymentRecord, *, actor_id: ObjectId
+    booking_oid: ObjectId,
+    payload: PaymentRecord,
+    *,
+    actor_id: ObjectId,
+    provider: str = "manual",
+    kind: str = "payment",
 ) -> dict[str, Any]:
+    """Write a payment to the ledger.
+
+    `provider` and `kind` are parameters because this is also how online
+    balance payments are recorded. Stamping those "manual" made them invisible
+    to both refund paths — the automatic one filters on `kind`, the admin one
+    on `provider` — so a customer could pay a balance by card and have no way
+    to be refunded.
+    """
     booking = await _raw_booking(booking_oid)
     now = utcnow()
     await mongodb.payments().insert_one(
@@ -919,7 +960,8 @@ async def record_payment(
             "amount": float(payload.amount),
             "method": payload.method.value,
             "status": payload.status.value,
-            "provider": "manual",
+            "provider": provider,
+            "kind": kind,
             "provider_reference": payload.reference,
             "note": payload.note,
             "recorded_by": actor_id,
@@ -927,9 +969,20 @@ async def record_payment(
             "updated_at": now,
         }
     )
-    paid = float(booking.get("amount_paid") or 0)
-    if payload.status in {PaymentStatus.PAID, PaymentStatus.PARTIALLY_PAID, PaymentStatus.CASH}:
-        paid += float(payload.amount)
+    # $inc, not read-add-write: two payments applied at the same instant (a
+    # webhook and a callback, or reconcile racing either) both read the same
+    # starting figure and the second overwrote the first, losing the money.
+    delta = (
+        float(payload.amount)
+        if payload.status in {PaymentStatus.PAID, PaymentStatus.PARTIALLY_PAID, PaymentStatus.CASH}
+        else 0.0
+    )
+    updated = await mongodb.bookings().find_one_and_update(
+        {"_id": booking_oid},
+        {"$inc": {"amount_paid": delta}},
+        return_document=True,
+    )
+    paid = round(float((updated or {}).get("amount_paid") or 0), 2)
     total = float(booking["total_fare"])
     if payload.status == PaymentStatus.REFUNDED:
         booking_payment_status = PaymentStatus.REFUNDED
@@ -946,7 +999,6 @@ async def record_payment(
         {"_id": booking_oid},
         {
             "$set": {
-                "amount_paid": round(paid, 2),
                 "payment_status": booking_payment_status.value,
                 "updated_at": now,
             }

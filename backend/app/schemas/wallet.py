@@ -140,7 +140,7 @@ class WalletTopUp(ApiModel):
 
 
 class WalletAdjustment(ApiModel):
-    amount: float = Field(le=1_000_000)
+    amount: float = Field(ge=-1_000_000, le=1_000_000, allow_inf_nan=False)
     note: str = Field(min_length=3, max_length=200)
 
 

@@ -77,6 +77,12 @@ class Settings(BaseSettings):
     #: Verifies that a webhook really came from Razorpay. Server-side only.
     RAZORPAY_WEBHOOK_SECRET: str = ""
 
+    #: How many reverse proxies sit in front of this app. 0 means the server
+    #: is reached directly and `X-Forwarded-For` must not be believed at all —
+    #: trusting a client-supplied header defeats every rate limit here. Set to
+    #: 1 behind a single nginx.
+    TRUSTED_PROXY_HOPS: int = 0
+
     # ---- Uploads ----
     #: Where driver documents are written. A directory on the server, not a
     #: public path — files are served only through an authenticated route.

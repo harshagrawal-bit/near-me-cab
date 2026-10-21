@@ -1,5 +1,9 @@
 # ---- Secrets ----
+# Every env file, not just `.env` — a committed `.env.backup-*` leaked the
+# live JWT signing key once, which is an admin token for anyone with the repo.
 .env
+.env.*
+!.env.example
 .env.local
 .env.*.local
 *.pem

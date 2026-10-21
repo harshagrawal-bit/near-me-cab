@@ -11,6 +11,8 @@ the frontend receives a capability flag, never the key itself.
 
 from __future__ import annotations
 
+import re
+
 from typing import Any, Protocol
 
 from app.core.config import settings
@@ -78,17 +80,32 @@ def capabilities() -> dict[str, Any]:
     }
 
 
-async def suggest_places(query: str, limit: int = 8) -> list[dict[str, Any]]:
+async def suggest_places(
+    query: str, limit: int = 8, *, user_id: Any | None = None
+) -> list[dict[str, Any]]:
     provider = get_provider()
     results = await provider.suggest(query, limit)
     if results:
         return results
-    # Fall back to distinct saved locations so a customer's own addresses
-    # remain searchable even for places outside the route catalogue.
-    matches = await mongodb.users().distinct(
-        "saved_locations.address", {"saved_locations.address": {"$regex": query, "$options": "i"}}
+    if user_id is None:
+        # No signed-in user, no fallback. This previously searched *every*
+        # user's saved addresses with `distinct`, so one anonymous request for
+        # a house number returned strangers' home addresses.
+        return []
+
+    # A customer's own saved addresses, scoped to them. `re.escape` because an
+    # unescaped term is both a regex injection and a way to make mongod scan
+    # the whole collection on an unindexed field.
+    pattern = re.escape(query.strip())
+    owner = await mongodb.users().find_one(
+        {"_id": user_id}, {"saved_locations.address": 1}
     )
-    return [{"description": m, "place_id": None, "source": "saved"} for m in matches[:limit]]
+    saved = [
+        entry.get("address")
+        for entry in (owner or {}).get("saved_locations", [])
+        if entry.get("address") and re.search(pattern, entry["address"], re.IGNORECASE)
+    ]
+    return [{"description": m, "place_id": None, "source": "saved"} for m in saved[:limit]]
 
 
 async def estimate_distance(origin: str, destination: str) -> dict[str, Any] | None:

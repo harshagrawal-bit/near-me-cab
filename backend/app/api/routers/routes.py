@@ -43,7 +43,7 @@ async def vehicle_classes(user: CurrentUser) -> list[dict]:
 
 @router.get("/places", summary="Place suggestions for pickup/drop inputs")
 async def places(user: CurrentUser, q: str = Query("", max_length=60)) -> list[dict]:
-    return await maps_service.suggest_places(q)
+    return await maps_service.suggest_places(q, user_id=user["_id"])
 
 
 @router.get("/map-capabilities", summary="Which mapping features are live")

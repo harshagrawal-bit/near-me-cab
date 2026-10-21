@@ -195,11 +195,15 @@ BOOKING_TRANSITIONS: dict[BookingStatus, set[BookingStatus]] = {
     BookingStatus.DRIVER_ASSIGNED: {
         BookingStatus.ACCEPTED,
         BookingStatus.DRIVER_ASSIGNED,  # reassignment keeps the same state
+        # Back to the pool when a driver drops the trip: the customer still
+        # wants it, so it is re-offered rather than killed off.
+        BookingStatus.CONFIRMED,
         BookingStatus.CANCELLED,
     },
     BookingStatus.ACCEPTED: {
         BookingStatus.DRIVER_ARRIVING,
         BookingStatus.DRIVER_ASSIGNED,  # admin reassignment
+        BookingStatus.CONFIRMED,  # driver dropped it; back to the pool
         BookingStatus.CANCELLED,
     },
     BookingStatus.DRIVER_ARRIVING: {
