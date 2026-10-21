@@ -28,6 +28,21 @@
   </div>
 </header>
 
+<nav class="jump" aria-label="Jump to section">
+  <div class="wrap">
+    <a href="#book">Book</a>
+    <a href="#how">How it works</a>
+    <a href="#services">Services</a>
+    <a href="#fleet">Our cars</a>
+    <a href="#fare">What the fare covers</a>
+    <a href="#paying">Paying</a>
+    <a href="#cancelling">Cancelling</a>
+    <a href="#routes">Routes</a>
+    <a href="#faq">FAQ</a>
+    <a href="#track">Track</a>
+  </div>
+</nav>
+
 <main id="top">
 
   <section class="hero">
@@ -125,35 +140,228 @@
     </div>
   </section>
 
-  <section class="band">
+  <section class="band" id="how">
     <div class="wrap">
       <div class="section-head">
-        <h2>Why people book with us</h2>
-        <p>The things that actually matter on a long drive.</p>
+        <span class="eyebrow">How it works</span>
+        <h2>Four steps, about a minute</h2>
+        <p>No app to install and no account to create.</p>
       </div>
-      <div class="grid-3">
-        <div class="feature">
-          <div class="icon">💰</div>
-          <h3>The price you were quoted</h3>
-          <p>The fare is worked out before you book and does not move. Tolls, parking and state permits are stated up front.</p>
+      <div class="steps">
+        <div class="step">
+          <h3>Tell us the trip</h3>
+          <p>Where you are going from and to, the date and the time.</p>
         </div>
-        <div class="feature">
-          <div class="icon">🪪</div>
-          <h3>Drivers we have checked</h3>
-          <p>Licence, registration and insurance are on file and verified before a driver takes a single trip.</p>
+        <div class="step">
+          <h3>See the fare</h3>
+          <p>Every car we can send, each with its price. Nothing is hidden until later.</p>
         </div>
-        <div class="feature">
-          <div class="icon">🕑</div>
-          <h3>Free cancellation</h3>
-          <p id="cancelCopy">Cancel well before pickup and you pay nothing.</p>
+        <div class="step">
+          <h3>Confirm</h3>
+          <p>Your name and mobile number. We call you back to confirm the car.</p>
+        </div>
+        <div class="step">
+          <h3>Travel</h3>
+          <p>Your driver's name and number reach you before pickup.</p>
         </div>
       </div>
     </div>
   </section>
 
-  <section class="band alt">
+  <section class="band alt" id="services">
     <div class="wrap">
       <div class="section-head">
+        <span class="eyebrow">Services</span>
+        <h2>What we drive</h2>
+        <p>Four kinds of trip, priced differently because they cost differently to run.</p>
+      </div>
+      <div class="services">
+        <div class="service">
+          <h3>One-way outstation</h3>
+          <p>City to city, dropped and done. You pay for the distance you travel.</p>
+          <ul>
+            <li>No return fare charged</li>
+            <li>Best for a one-direction journey</li>
+            <li>Driver allowance included in the quote</li>
+          </ul>
+        </div>
+        <div class="service">
+          <h3>Round trip</h3>
+          <p>The car stays with you and brings you home. Useful when you need it waiting.</p>
+          <ul>
+            <li>Same car and driver throughout</li>
+            <li>Multi-day trips welcome</li>
+            <li>Driver night allowance where applicable</li>
+          </ul>
+        </div>
+        <div class="service">
+          <h3>Airport transfer</h3>
+          <p>To or from the terminal, with the flight time accounted for.</p>
+          <ul>
+            <li>Pickup timed around your flight</li>
+            <li>Help with luggage</li>
+            <li>Airport entry charges at actuals</li>
+          </ul>
+        </div>
+        <div class="service">
+          <h3>Local hourly</h3>
+          <p>A car and driver for the day — meetings, shopping, a wedding.</p>
+          <ul>
+            <li>Hourly packages with a km allowance</li>
+            <li>Extra hours and km charged at a stated rate</li>
+            <li>Within city limits</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="band" id="fleet">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="eyebrow">Our cars</span>
+        <h2>Pick the size you need</h2>
+        <p>Seating is for passengers, not counting the driver.</p>
+      </div>
+      <div class="fleet" id="fleetList"><p class="hint">Loading…</p></div>
+      <div class="callout">
+        <p>
+          <strong>You get the class you booked, or better.</strong> We name a class rather
+          than a model, so if the exact car is unavailable you travel in something equivalent
+          or larger — never smaller, and never at a higher fare.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="band alt" id="fare">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="eyebrow">Fares</span>
+        <h2>What the fare covers</h2>
+        <p>The question people ask us most. Here is the whole answer.</p>
+      </div>
+      <div class="inclusions">
+        <div class="inc-card inc-yes">
+          <h3><span aria-hidden="true">✓</span> Included in the fare you see</h3>
+          <ul>
+            <li><span class="mark" aria-hidden="true">✓</span><span>The distance of your trip, at the rate quoted</span></li>
+            <li><span class="mark" aria-hidden="true">✓</span><span>Driver allowance (bata), including overnight where it applies</span></li>
+            <li><span class="mark" aria-hidden="true">✓</span><span>Fuel and vehicle running costs</span></li>
+            <li><span class="mark" aria-hidden="true">✓</span><span>Applicable taxes</span></li>
+          </ul>
+        </div>
+        <div class="inc-card inc-no">
+          <h3><span aria-hidden="true">!</span> Charged separately, at actuals</h3>
+          <ul>
+            <li><span class="mark" aria-hidden="true">+</span><span>Road tolls along the route</span></li>
+            <li><span class="mark" aria-hidden="true">+</span><span>Parking charges where you ask the car to wait</span></li>
+            <li><span class="mark" aria-hidden="true">+</span><span>State permit fees when the trip crosses a border</span></li>
+            <li><span class="mark" aria-hidden="true">+</span><span>Airport entry charges</span></li>
+          </ul>
+        </div>
+      </div>
+      <div class="callout">
+        <p>
+          <strong>Every fare on this site tells you which applies.</strong> When you choose a
+          car you will see a tag reading either <em>Toll included</em> or
+          <em>Toll + parking extra</em>, so you know before you book rather than at the drop.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="band" id="paying">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="eyebrow">Paying</span>
+        <h2>Pay how it suits you</h2>
+        <p id="payIntro">Choose when you pay. Booking on this page settles with the driver.</p>
+      </div>
+      <div class="pay-list" id="payList"><p class="hint">Loading…</p></div>
+      <div class="callout">
+        <p>
+          <strong>We never ask for money over the phone.</strong> Anything you pay online goes
+          through a secure payment provider, and we never see or store your card number.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="band alt" id="cancelling">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="eyebrow">Cancelling</span>
+        <h2>Plans change</h2>
+        <p>The rule in full, so there is nothing to discover later.</p>
+      </div>
+      <div class="inclusions">
+        <div class="inc-card inc-yes">
+          <h3><span aria-hidden="true">✓</span> Free cancellation</h3>
+          <ul id="cancelFree">
+            <li><span class="mark" aria-hidden="true">✓</span><span>Loading…</span></li>
+          </ul>
+        </div>
+        <div class="inc-card inc-no">
+          <h3><span aria-hidden="true">!</span> Close to pickup</h3>
+          <ul id="cancelLate">
+            <li><span class="mark" aria-hidden="true">+</span><span>Loading…</span></li>
+          </ul>
+        </div>
+      </div>
+      <div class="callout">
+        <p>
+          <strong>If we cancel, you are refunded in full.</strong> That includes a driver
+          dropping your trip — we assign another car and you are not charged for the change.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="band">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="eyebrow">Why us</span>
+        <h2>Why people book with us</h2>
+        <p>The things that actually matter on a long drive.</p>
+      </div>
+      <div class="grid-3">
+        <div class="feature">
+          <div class="icon" aria-hidden="true">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#d81f26" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+          </div>
+          <h3>The price you were quoted</h3>
+          <p>The fare is worked out before you book and does not move. No surge pricing, ever.</p>
+        </div>
+        <div class="feature">
+          <div class="icon" aria-hidden="true">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#d81f26" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/><path d="m9 12 2 2 4-4"/></svg>
+          </div>
+          <h3>Drivers we have checked</h3>
+          <p>Licence, registration and insurance are on file and verified before a driver takes a trip.</p>
+        </div>
+        <div class="feature">
+          <div class="icon" aria-hidden="true">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#d81f26" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+          </div>
+          <h3>Free cancellation</h3>
+          <p id="cancelCopy">Cancel well before pickup and you pay nothing.</p>
+        </div>
+      </div>
+
+      <div class="trust" style="margin-top:28px">
+        <div class="trust-item"><div class="big">24x7</div><div class="cap" id="trustHours">Booking support</div></div>
+        <div class="trust-item"><div class="big">0%</div><div class="cap">Surge pricing</div></div>
+        <div class="trust-item"><div class="big" id="trustRoutes">—</div><div class="cap">Routes priced</div></div>
+        <div class="trust-item"><div class="big">5</div><div class="cap">Vehicle classes</div></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="band alt" id="routes">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="eyebrow">Routes</span>
         <h2>Popular routes</h2>
         <p>Tap one to load it into the booking form.</p>
       </div>
@@ -163,9 +371,20 @@
     </div>
   </section>
 
-  <section class="band">
+  <section class="band" id="faq">
     <div class="wrap">
       <div class="section-head">
+        <span class="eyebrow">Questions</span>
+        <h2>Frequently asked</h2>
+      </div>
+      <div class="faq" id="faqList"></div>
+    </div>
+  </section>
+
+  <section class="band" id="track">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="eyebrow">Your trip</span>
         <h2>Already booked?</h2>
         <p>Check your trip with the reference we sent you.</p>
       </div>

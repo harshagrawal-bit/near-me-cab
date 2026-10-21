@@ -212,3 +212,142 @@ footer.site ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 7p
   box-shadow: 0 6px 20px rgba(216, 31, 38, .35);
 }
 @media (min-width: 900px) { .call-fab { display: none; } }
+
+
+/* ======================================================================
+   Information sections
+   Added because the first cut was a booking form and almost nothing else:
+   a customer could not find out what a fare covers, what a cancellation
+   costs, or which car seats six without phoning.
+   ====================================================================== */
+
+.eyebrow {
+  display: inline-block; font-size: .75rem; font-weight: 800; letter-spacing: .08em;
+  text-transform: uppercase; color: var(--brand); margin-bottom: 8px;
+}
+
+/* Jump bar — fourteen screens of content needs a way through it. */
+.jump { border-bottom: 1px solid var(--ink-100); background: #fff; }
+.jump .wrap { display: flex; gap: 6px; overflow-x: auto; padding-top: 10px; padding-bottom: 10px; }
+.jump a {
+  white-space: nowrap; font-size: .8125rem; font-weight: 600; color: var(--ink-600);
+  text-decoration: none; padding: 7px 12px; border-radius: 8px; background: var(--ink-50);
+}
+.jump a:hover { background: var(--ink-100); color: var(--ink-900); }
+
+/* Steps */
+.steps { display: grid; gap: 14px; grid-template-columns: 1fr; counter-reset: step; }
+@media (min-width: 760px) { .steps { grid-template-columns: repeat(4, 1fr); } }
+.step { position: relative; padding: 20px 18px 18px; border: 1px solid var(--ink-100); border-radius: var(--radius); background: #fff; }
+.step::before {
+  counter-increment: step; content: counter(step);
+  position: absolute; top: -14px; left: 18px;
+  width: 28px; height: 28px; border-radius: 50%; background: var(--brand); color: #fff;
+  display: grid; place-items: center; font-weight: 800; font-size: .8125rem;
+}
+.step h3 { margin: 8px 0 6px; font-size: 1rem; }
+.step p { margin: 0; color: var(--ink-500); font-size: .875rem; }
+
+/* Service cards */
+.services { display: grid; gap: 14px; grid-template-columns: 1fr; }
+@media (min-width: 700px) { .services { grid-template-columns: repeat(2, 1fr); } }
+.service {
+  position: relative; overflow: hidden; padding: 22px 20px;
+  border: 1px solid var(--ink-100); border-radius: var(--radius); background: #fff;
+}
+.service::before { content: ''; position: absolute; inset: 0 auto 0 0; width: 4px; background: var(--brand); }
+.service h3 { margin: 0 0 6px; font-size: 1.05rem; padding-left: 10px; }
+.service p { margin: 0 0 12px; color: var(--ink-600); font-size: .9rem; padding-left: 10px; }
+.service ul { margin: 0; padding-left: 28px; color: var(--ink-500); font-size: .875rem; }
+.service li { margin-bottom: 5px; }
+
+/* Fleet */
+.fleet { display: grid; gap: 12px; grid-template-columns: 1fr; }
+@media (min-width: 640px) { .fleet { grid-template-columns: repeat(2, 1fr); } }
+@media (min-width: 980px) { .fleet { grid-template-columns: repeat(3, 1fr); } }
+.vehicle { border: 1px solid var(--ink-100); border-radius: var(--radius); background: #fff; padding: 18px; }
+.vehicle-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+.vehicle h3 { margin: 0; font-size: 1.02rem; }
+.seats {
+  font-size: .75rem; font-weight: 700; color: var(--brand-dark);
+  background: var(--brand-tint); border-radius: 999px; padding: 4px 10px; white-space: nowrap;
+}
+.vehicle p { margin: 0; color: var(--ink-500); font-size: .875rem; }
+
+/* Included / excluded — the single most-asked question, so it gets the
+   strongest treatment on the page. */
+.inclusions { display: grid; gap: 14px; grid-template-columns: 1fr; }
+@media (min-width: 760px) { .inclusions { grid-template-columns: 1fr 1fr; } }
+.inc-card { border-radius: var(--radius); padding: 20px; border: 1px solid; }
+.inc-yes { background: #ecfdf5; border-color: #a7f3d0; }
+.inc-no { background: var(--amber-bg); border-color: var(--amber-border); }
+.inc-card h3 { margin: 0 0 12px; font-size: 1rem; display: flex; align-items: center; gap: 8px; }
+.inc-yes h3 { color: var(--green); }
+.inc-no h3 { color: var(--amber-text); }
+.inc-card ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 9px; }
+.inc-card li { display: flex; gap: 9px; align-items: flex-start; font-size: .9rem; }
+.inc-yes li { color: #065f46; }
+.inc-no li { color: var(--amber-text); }
+.mark { flex: none; font-weight: 800; }
+
+/* Callout — one fact we want nobody to miss. */
+.callout {
+  border-left: 4px solid var(--brand); background: var(--brand-tint);
+  border-radius: 0 var(--radius) var(--radius) 0; padding: 18px 20px; margin-top: 18px;
+}
+.callout strong { color: var(--brand-dark); }
+.callout p { margin: 0; color: var(--ink-700); font-size: .9rem; }
+
+/* Payment option rows */
+.pay-list { display: grid; gap: 10px; }
+.pay-row {
+  display: flex; gap: 14px; align-items: flex-start;
+  border: 1px solid var(--ink-100); border-radius: 12px; padding: 16px; background: #fff;
+}
+.pay-row .num {
+  flex: none; width: 30px; height: 30px; border-radius: 8px; background: var(--ink-900);
+  color: #fff; display: grid; place-items: center; font-weight: 800; font-size: .8125rem;
+}
+.pay-row h3 { margin: 0 0 3px; font-size: .95rem; }
+.pay-row p { margin: 0; color: var(--ink-500); font-size: .865rem; }
+.badge-rec {
+  display: inline-block; margin-left: 8px; background: #f59e0b; color: #fff;
+  font-size: .625rem; font-weight: 800; letter-spacing: .04em;
+  padding: 2px 7px; border-radius: 5px; text-transform: uppercase; vertical-align: middle;
+}
+
+/* FAQ */
+.faq { display: grid; gap: 10px; max-width: 780px; margin: 0 auto; }
+.faq details {
+  border: 1px solid var(--ink-100); border-radius: 12px; background: #fff; padding: 0 18px;
+}
+.faq details[open] { border-color: var(--ink-200); }
+.faq summary {
+  cursor: pointer; font-weight: 650; padding: 16px 0; list-style: none;
+  display: flex; justify-content: space-between; gap: 12px; align-items: center;
+}
+.faq summary::-webkit-details-marker { display: none; }
+.faq summary::after { content: '+'; color: var(--brand); font-size: 1.3rem; font-weight: 400; line-height: 1; }
+.faq details[open] summary::after { content: '\2212'; }
+.faq .answer { padding: 0 0 16px; color: var(--ink-600); font-size: .9rem; border-top: 1px solid var(--ink-100); padding-top: 14px; }
+
+/* Trust strip */
+.trust { display: grid; gap: 12px; grid-template-columns: repeat(2, 1fr); }
+@media (min-width: 760px) { .trust { grid-template-columns: repeat(4, 1fr); } }
+.trust-item { text-align: center; padding: 18px 12px; border-radius: var(--radius); background: #fff; border: 1px solid var(--ink-100); }
+.trust-item .big { font-size: 1.5rem; font-weight: 800; color: var(--brand); }
+.trust-item .cap { font-size: .8125rem; color: var(--ink-500); margin-top: 2px; }
+
+/* Focus visibility — the UA default is inconsistent with the app's rings. */
+.btn:focus-visible, .pill:focus-visible, .fare:focus-visible,
+.route-card:focus-visible, .call-fab:focus-visible, .jump a:focus-visible,
+.faq summary:focus-visible {
+  outline: none; box-shadow: 0 0 0 3px rgba(216, 31, 38, .35);
+}
+
+/* The sticky call button overlapped full-width buttons at the page end. */
+main { padding-bottom: 76px; }
+@media (min-width: 900px) { main { padding-bottom: 0; } }
+
+/* Two-up rows were unusable at 360px — a 10-digit number did not fit. */
+@media (max-width: 559px) { .row { grid-template-columns: 1fr; } }

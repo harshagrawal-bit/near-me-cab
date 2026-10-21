@@ -63,6 +63,11 @@ async function loadCompany() {
         `Cancel more than ${rules.customer_free_hours} hours before pickup and you pay nothing.`
     }
 
+    renderPaymentOptions(data)
+    renderCancellation(data)
+    renderFaq(data)
+    if ($('trustHours') && c.working_hours) $('trustHours').textContent = `Booking support (${c.working_hours})`
+
     // Policy pages are served by the API, so they live wherever it does.
     const base = API || ''
     if ($('linkPrivacy')) $('linkPrivacy').href = `${base}/privacy`
@@ -73,19 +78,158 @@ async function loadCompany() {
   }
 }
 
+/* ------------------------------------------------- information sections --- */
+
+/**
+ * The money rules are rendered from the API, not written into the page.
+ *
+ * A site that promises free cancellation for two hours while the engine
+ * charges after one is worse than a site that says nothing, and the two drift
+ * the moment somebody changes a setting. Everything factual below comes from
+ * the same settings the booking code reads.
+ */
+function renderPaymentOptions(data) {
+  const host = $('payList')
+  if (!host) return
+  const options = data.payment_options || {}
+  const percent = Math.round(Number(data.advance?.percent) || 0)
+  const recommended = options.recommended || 'part'
+
+  const rows = [
+    options.allow_pay_later !== false && {
+      id: 'pay_later',
+      title: 'Book now, pay later',
+      body: 'Nothing up front. Settle the whole fare with the driver at the end of the trip.',
+    },
+    options.allow_part_payment !== false && {
+      id: 'part',
+      title: `Part payment — ${percent}% now`,
+      body: `Pay ${percent}% to hold the car, the rest at the drop. Paid by card, UPI, netbanking or wallet.`,
+    },
+    options.allow_full_payment !== false && {
+      id: 'full',
+      title: 'Pay in full',
+      body: 'Settle the whole fare up front so there is nothing left to pay at the end.',
+    },
+  ].filter(Boolean)
+
+  host.innerHTML = ''
+  rows.forEach((row, index) => {
+    const el = document.createElement('div')
+    el.className = 'pay-row'
+    el.innerHTML =
+      `<span class="num">${index + 1}</span>` +
+      `<span><h3>${escapeHtml(row.title)}` +
+      (row.id === recommended ? '<span class="badge-rec">Most popular</span>' : '') +
+      `</h3><p>${escapeHtml(row.body)}</p></span>`
+    host.appendChild(el)
+  })
+
+  if ($('payIntro')) {
+    $('payIntro').textContent =
+      'Choose when you pay. Booking on this page settles with the driver; the options below are available in the app.'
+  }
+}
+
+function renderCancellation(data) {
+  const rules = data.cancellation
+  if (!rules) return
+  const hours = rules.customer_free_hours
+  const percent = Math.round(Number(rules.customer_fee_percent) || 0)
+  const hourWord = hours === 1 ? 'hour' : 'hours'
+
+  const free = $('cancelFree')
+  if (free) {
+    free.innerHTML = [
+      `Cancel more than ${hours} ${hourWord} before pickup and you pay nothing.`,
+      'Anything you have already paid comes back in full.',
+      'Refunds reach the account you paid from, usually in 5–7 working days.',
+    ].map((line) => `<li><span class="mark" aria-hidden="true">✓</span><span>${escapeHtml(line)}</span></li>`).join('')
+  }
+
+  const late = $('cancelLate')
+  if (late) {
+    late.innerHTML = [
+      `Cancel within ${hours} ${hourWord} of pickup and we keep ${percent}% of what you have paid.`,
+      'The rest is refunded automatically — you do not have to ask.',
+      'Once the trip has started it cannot be cancelled here. Call us instead.',
+    ].map((line) => `<li><span class="mark" aria-hidden="true">+</span><span>${escapeHtml(line)}</span></li>`).join('')
+  }
+}
+
+async function loadFleet() {
+  const host = $('fleetList')
+  if (!host) return
+  try {
+    const classes = await api('/vehicle-classes')
+    host.innerHTML = ''
+    ;(classes || []).forEach((item) => {
+      const el = document.createElement('div')
+      el.className = 'vehicle'
+      el.innerHTML =
+        `<div class="vehicle-top"><h3>${escapeHtml(item.label)}</h3>` +
+        `<span class="seats">${item.seating_capacity} seats</span></div>` +
+        `<p>${escapeHtml(item.description || '')}</p>`
+      host.appendChild(el)
+    })
+  } catch {
+    host.innerHTML = '<p class="hint">Call us and we will tell you what is available.</p>'
+  }
+}
+
+function renderFaq(data) {
+  const host = $('faqList')
+  if (!host) return
+  const c = data.company || {}
+  const rules = data.cancellation || {}
+  const percent = Math.round(Number(data.advance?.percent) || 0)
+  const hours = rules.customer_free_hours
+  const hourWord = hours === 1 ? 'hour' : 'hours'
+
+  const items = [
+    ['Do I need an account to book?',
+     'No. Give us a name and a mobile number and we will call you back to confirm. An account is only needed if you want to pay online or track trips in the app.'],
+    ['When do I pay, and how?',
+     `Booking on this page, you settle the full fare with the driver. In the app you can also pay ${percent}% up front to hold the car, or pay in full — by card, UPI, netbanking or wallet.`],
+    ['Are tolls and parking included?',
+     'Usually not. Road tolls, parking, state permits and airport entry are charged at actuals on top of the fare. Every car you are offered carries a tag saying which applies to that trip.'],
+    ['What if I need to cancel?',
+     `Cancel more than ${hours} ${hourWord} before pickup and you pay nothing. Inside that window we keep ${Math.round(Number(rules.customer_fee_percent) || 0)}% of what you have paid and refund the rest automatically.`],
+    ['How do I know who is driving?',
+     'Once a driver is assigned you get their name, number and vehicle. For your privacy the driver only sees your number shortly before pickup.'],
+    ['Can I book for someone else?',
+     'Yes. Put their name and number in the passenger details and we will coordinate with them directly.'],
+    ['Do you drive between states?',
+     'Yes. State permit fees apply on the route and are charged at actuals — we tell you the amount before you travel.'],
+    ['What if my flight is delayed?',
+     `Call us on ${c.support_phone || 'our number'} and we will move the pickup. We track the booking, not the clock.`],
+    ['Is there a cancellation charge for the driver too?',
+     'Yes. Drivers are charged when they drop a trip they accepted, rising the closer it is to pickup. It is why cancellations by our side are rare.'],
+  ]
+
+  host.innerHTML = items.map(([q, a]) => (
+    `<details><summary>${escapeHtml(q)}</summary><div class="answer">${escapeHtml(a)}</div></details>`
+  )).join('')
+}
+
 /* ------------------------------------------------------------- routes --- */
 
 async function loadRoutes() {
   const host = $('routeList')
   try {
-    const data = await api('/routes?limit=9')
+    // Fetch the catalogue, show a handful. The trust figure must be the real
+    // total, not the page size — a count that is really "how many we rendered"
+    // is a number that quietly lies.
+    const data = await api('/routes?limit=200')
     state.routes = data.items || []
+    if ($('trustRoutes')) $('trustRoutes').textContent = String(state.routes.length)
+    const featured = state.routes.slice(0, 9)
     if (!state.routes.length) {
       host.innerHTML = '<p class="hint">Call us and we will quote any route.</p>'
       return
     }
     host.innerHTML = ''
-    state.routes.forEach((route) => {
+    featured.forEach((route) => {
       const button = document.createElement('button')
       button.type = 'button'
       button.className = 'route-card'
@@ -355,6 +499,7 @@ function init() {
 
   loadCompany()
   loadRoutes()
+  loadFleet()
 }
 
 document.addEventListener('DOMContentLoaded', init)
